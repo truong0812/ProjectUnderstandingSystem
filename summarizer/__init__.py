@@ -1,0 +1,1 @@
+"""Summarizer module — tóm tắt code chunks bằng LLM."""

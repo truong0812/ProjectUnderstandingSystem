@@ -1,0 +1,1 @@
+"""Pipeline module — điều phối quy trình parse → chunk → summarize → store."""

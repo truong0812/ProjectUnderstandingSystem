@@ -1,0 +1,1 @@
+"""Storage module — lưu trữ kết quả tóm tắt (Markdown, JSON, FAISS)."""
