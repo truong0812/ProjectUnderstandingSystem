@@ -17,12 +17,10 @@ except ImportError:
         "faiss-cpu chưa được cài. Chạy: pip install faiss-cpu"
     )
 
-from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 
 from config.settings import (
-    OPENAI_API_KEY,
-    OPENAI_API_BASE,
-    EMBEDDING_MODEL,
+    HF_EMBEDDING_MODEL,
     DEFAULT_TOP_K,
 )
 from summarizer.llm_summarizer import ChunkSummary
@@ -59,10 +57,8 @@ class VectorStore:
         self.index_dir = index_dir
         self.index: faiss.IndexFlatIP | None = None
         self.summaries: list[ChunkSummary] = []
-        self.embeddings_model = OpenAIEmbeddings(
-            model=EMBEDDING_MODEL,
-            api_key=OPENAI_API_KEY,
-            base_url=OPENAI_API_BASE,
+        self.embeddings_model = HuggingFaceEmbeddings(
+            model_name=HF_EMBEDDING_MODEL,
         )
         self._embeddings_matrix: np.ndarray | None = None
 

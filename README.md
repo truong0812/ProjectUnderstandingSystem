@@ -87,7 +87,7 @@ Thư mục repo
 | Yêu cầu | Cách lấy |
 |---------|----------|
 | **Python 3.10+** | [python.org](https://www.python.org/downloads/) |
-| **OpenAI API Key** | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| **NVIDIA API Key** | [build.nvidia.com](https://build.nvidia.com/) → Sign in → Get API Key |
 
 ---
 
@@ -123,13 +123,21 @@ cp .env.example .env
 Sửa file `.env`:
 
 ```env
-OPENAI_API_KEY=sk-proj-your-actual-key-here
-OPENAI_API_BASE=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini
-EMBEDDING_MODEL=text-embedding-3-small
+# NVIDIA API (khuyên dùng — miễn phí)
+OPENAI_API_KEY=nvapi-your-key-here
+OPENAI_API_BASE=https://integrate.api.nvidia.com/v1
+LLM_MODEL=meta/llama-3.1-8b-instruct
 ```
 
-> **Dùng provider khác** (Groq, OpenRouter, LM Studio): Thay `OPENAI_API_BASE` tương ứng.
+**Models NVIDIA miễn phí phổ biến:**
+
+| Model | LLM_MODEL value | Đặc điểm |
+|---|---|---|
+| Llama 3.1 8B | `meta/llama-3.1-8b-instruct` | Nhanh, rẻ, đủ dùng |
+| Llama 3.1 70B | `meta/llama-3.1-70b-instruct` | Chính xác hơn, chậm hơn |
+| Mixtral 8x7B | `mistralai/mixtral-8x7b-instruct-v0.1` | Cân bằng tốc độ/chất lượng |
+
+> **Dùng provider khác** (Groq, OpenRouter, OpenAI, LM Studio): Thay `OPENAI_API_BASE` và `LLM_MODEL` tương ứng.
 
 ---
 
@@ -284,8 +292,8 @@ Tất cả cấu hình qua file `.env`:
 | **Language** | Python 3.10+ | Ngôn ngữ chính |
 | **Web Framework** | FastAPI | API server hiệu năng cao, auto-docs |
 | **ASGI Server** | Uvicorn | Chạy FastAPI |
-| **LLM** | OpenAI GPT-4o-mini (via LangChain) | Tóm tắt code chunks |
-| **Embeddings** | OpenAI `text-embedding-3-small` | Vector hóa summaries |
+| **LLM** | NVIDIA NIM (`meta/llama-3.1-8b-instruct`) | Tóm tắt code chunks (miễn phí) |
+| **Embeddings** | HuggingFace `all-MiniLM-L6-v2` (local) | Vector hóa summaries (offline, miễn phí) |
 | **Vector DB** | FAISS (faiss-cpu) | Lưu trữ & tìm kiếm vector similarity |
 | **LLM Framework** | LangChain (langchain-openai, langchain-community) | Quản lý LLM calls, embeddings |
 | **Data** | NumPy, Pickle | Xử lý ma trận embeddings, serialize metadata |
@@ -304,6 +312,8 @@ Code File → Parser → Chunker → LLM Summarizer → Storage
 ---
 
 ## 🔮 Hướng phát triển tương lai
+
+> 📋 **Kế hoạch nâng cấp chi tiết:** Xem [docs/UPGRADE_PLAN.md](docs/UPGRADE_PLAN.md) — Quality Output & PR Ingest API
 
 ### Giai đoạn 1 — Cải thiện core
 - [ ] **AST parsing mở rộng**: Hỗ trợ Java, Go, Rust bằng tree-sitter thay vì regex
