@@ -1,357 +1,243 @@
-# 🧠 Repo Knowledge System
-
-Hệ thống tạo knowledge base từ code repository — Parse repo, chia chunk, tóm tắt bằng LLM, lưu trữ vector, và cung cấp API truy vấn cho AI bots khác.
-
-## 🎯 Mục tiêu
-
-Tạo một hệ thống kiến thức tái sử dụng mà các bot AI khác có thể truy vấn để hiểu codebase.
-
----
-
-## 📁 Cấu trúc dự án
-
-```
-project-understanding-system/
-├── config/
-│   ├── __init__.py
-│   └── settings.py              # Cấu hình từ .env
-├── parser/
-│   ├── __init__.py
-│   └── repo_parser.py           # Parse thư mục repo
-├── chunker/
-│   ├── __init__.py
-│   └── code_chunker.py          # Chia code thành chunks (AST + regex)
-├── summarizer/
-│   ├── __init__.py
-│   ├── llm_summarizer.py        # ⚡ Fast: Tóm tắt từng chunk bằng LLM
-│   └── crew_summarizer.py       # 🤖 Deep: Multi-agent crew (3 agents + synthesis)
-├── storage/
-│   ├── __init__.py
-│   ├── markdown_store.py        # Xuất Markdown
-│   ├── json_store.py            # Xuất JSON
-│   └── vector_store.py          # FAISS vector store
-├── pipeline/
-│   ├── __init__.py
-│   └── orchestrator.py          # Pipeline điều phối
-├── api/
-│   ├── __init__.py
-│   └── server.py                # FastAPI server (/context endpoint)
-├── output/                      # Kết quả (tự tạo khi chạy)
-├── main.py                      # CLI entry point
-├── .env.example                 # Template cấu hình
-├── .gitignore
-├── requirements.txt
-└── README.md
-```
-
----
-
-## 🔄 Workflow
-
-```
-Thư mục repo
-     │
-     ▼
-┌──────────────┐
-│   Parser     │  Duyệt cây thư mục, nhận diện file code
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│   Chunker    │  Chia code thành hàm/class/module (AST + regex)
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│  Summarizer  │  Tóm tắt TỪNG CHUNK bằng LLM (không load toàn bộ repo)
-└──────┬───────┘
-       │
-       ├──────────────────┬──────────────────┐
-       ▼                  ▼                  ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│  Markdown    │  │    JSON      │  │   FAISS      │
-│  summaries.md│  │ summaries.json│  │ vector index │
-└──────────────┘  └──────────────┘  └──────┬───────┘
-                                            │
-                                            ▼
-                                    ┌──────────────┐
-                                    │  FastAPI     │
-                                    │  /context    │  Bot AI truy vấn
-                                    └──────────────┘
-```
-
----
-
-## 📋 Prerequisites
-
-| Yêu cầu | Cách lấy |
-|---------|----------|
-| **Python 3.10+** | [python.org](https://www.python.org/downloads/) |
-| **NVIDIA API Key** | [build.nvidia.com](https://build.nvidia.com/) → Sign in → Get API Key |
-
----
-
-## 🚀 Cài đặt
-
-### Bước 1: Tạo virtual environment
-
-```bash
-python -m venv .venv
-
-# Windows CMD:
-.venv\Scripts\activate.bat
+# Project Understanding System
 
-# Windows PowerShell:
-.venv\Scripts\Activate.ps1
+Project Understanding System is a new project for building a `Project Understanding Agent`.
 
-# Linux/macOS:
-source .venv/bin/activate
-```
+Its job is to transform a source code repository into a `shared knowledge base` that other AI agents can use without rereading the entire codebase every time they work.
 
-### Bước 2: Cài dependencies
+This project is not just about code summarization. It is about building a reusable `AI-readable project memory` for agents such as:
 
-```bash
-pip install -r requirements.txt
-```
+- Review Agent
+- Dev Agent
+- Doc Agent
+- Test Agent
+- other specialized agents in the future
 
-### Bước 3: Cấu hình
+## Why this project exists
 
-```bash
-cp .env.example .env
-```
-
-Sửa file `.env`:
+In most AI-assisted engineering workflows, each agent repeatedly has to:
 
-```env
-# NVIDIA API (khuyên dùng — miễn phí)
-OPENAI_API_KEY=nvapi-your-key-here
-OPENAI_API_BASE=https://integrate.api.nvidia.com/v1
-LLM_MODEL=meta/llama-3.1-8b-instruct
-```
+- scan many files from the repository
+- rebuild its own understanding of modules and dependencies
+- work without shared context from other agents
+- spend extra tokens and time on the same discovery work
+- produce inconsistent conclusions across agents
 
-**Models NVIDIA miễn phí phổ biến:**
+Project Understanding System solves this with a shared architecture:
 
-| Model | LLM_MODEL value | Đặc điểm |
-|---|---|---|
-| Llama 3.1 8B | `meta/llama-3.1-8b-instruct` | Nhanh, rẻ, đủ dùng |
-| Llama 3.1 70B | `meta/llama-3.1-70b-instruct` | Chính xác hơn, chậm hơn |
-| Mixtral 8x7B | `mistralai/mixtral-8x7b-instruct-v0.1` | Cân bằng tốc độ/chất lượng |
+`Codebase -> Structured Knowledge Base -> AI Agents`
 
-> **Dùng provider khác** (Groq, OpenRouter, OpenAI, LM Studio): Thay `OPENAI_API_BASE` và `LLM_MODEL` tương ứng.
+Instead of forcing every agent to read the repository from scratch, the system ingests the codebase once, converts it into structured knowledge, and lets downstream agents consume that knowledge through their own profiles.
 
----
+## Product vision
 
-## ▶️ Sử dụng
+The system has two major layers.
 
-### Chạy pipeline phân tích repo
+### 1. Knowledge Producer
 
-```bash
-# ⚡ Fast mode (mặc định) — 1 LLM call/chunk, nhanh, rẻ
-python main.py /path/to/your/project
+The producer is responsible for:
 
-# 🤖 Deep mode — 3 agents + 1 synthesis/chunk, phân tích toàn diện
-python main.py /path/to/your/project --mode deep
+- ingesting a codebase
+- parsing repository structure
+- extracting entities and relations
+- summarizing files, modules, and symbols
+- identifying conventions and risk areas
+- building semantic indexes
+- materializing a versioned knowledge snapshot
 
-# Phân tích + khởi động API server
-python main.py /path/to/your/project --serve
+### 2. Knowledge Consumers
 
-# Kết hợp deep + serve
-python main.py /path/to/your/project --mode deep --serve
+Consumer agents such as `Review Agent`, `Dev Agent`, and `Doc Agent` should not need their own separate repository-understanding pipelines.
 
-# Chỉ định thư mục output
-python main.py /path/to/your/project --output ./my_output
-```
+They all use the same knowledge base, but read it differently through `agent profiles`.
 
-### So sánh Fast vs Deep
+This approach improves:
 
-| | ⚡ Fast | 🤖 Deep |
-|---|---|---|
-| **LLM calls/chunk** | 1 | 4 (3 agents + 1 synthesis) |
-| **Thời gian/chunk** | ~2-3s | ~15-20s |
-| **Chi phí** | Rẻ | ~4x fast |
-| **Chất lượng** | Tóm tắt tốt | Phân tích sâu: structure, docs, dependencies |
-| **Phù hợp** | Quick scan, CI/CD | Code review, documentation, kiến trúc analysis |
-| **Agents** | — | Code Analyzer, Doc Writer, Dependency Mapper |
+- consistency across agents
+- speed of review and development workflows
+- token efficiency
+- reuse of repository understanding
 
-### Chỉ khởi động API (dùng index đã có)
+## MVP definition
 
-```bash
-python main.py --serve
-```
+The MVP is designed as a shared knowledge system, not a single-agent feature.
 
----
+The first validation consumer is `Review Agent`, but the knowledge model must remain generic enough for other agents from the start.
 
-## 🌐 API Endpoints
+### MVP goals
 
-Sau khi khởi động server (`http://localhost:8000`):
+- build a shared knowledge base for multiple agents
+- store knowledge as `file-based shared memory`
+- support manual ingest for `1 repo / 1 branch / 1 snapshot`
+- support hybrid retrieval: structured + semantic
+- support agent-specific behavior through `JSON/YAML profiles`
+- keep the architecture multi-language and parser-agnostic
 
-### `GET /context`
+### Out of scope for MVP
 
-Tìm kiếm code summaries liên quan đến câu truy vấn.
+- dashboard UI
+- required live API service
+- automatic sync on every code change
+- multi-repo orchestration
+- auth and multi-tenant support
 
-```bash
-# Ví dụ
-curl "http://localhost:8000/context?query=how+does+authentication+work&top_k=5"
-```
+## Knowledge snapshot output
 
-Response:
-```json
-{
-  "query": "how does authentication work",
-  "top_k": 5,
-  "total_results": 3,
-  "results": [
-    {
-      "chunk_id": "auth.py::login::15",
-      "file_path": "auth.py",
-      "name": "login",
-      "chunk_type": "function",
-      "language": "python",
-      "start_line": 15,
-      "end_line": 42,
-      "summary": "Handles user login with JWT token generation...",
-      "purpose": "Authenticate user and return JWT token",
-      "parameters": "username: str, password: str",
-      "dependencies": "jwt, bcrypt, database",
-      "complexity": "medium — JWT token generation with error handling",
-      "score": 0.87
-    }
-  ]
-}
-```
+Each ingest run should create a versioned snapshot package with artifacts such as:
 
-### `POST /ingest`
+- `snapshot.json`
+- `entities.jsonl`
+- `relations.jsonl`
+- `summaries.jsonl`
+- `conventions.jsonl`
+- `risks.jsonl`
+- `indexes/`
+- `profiles/`
 
-Chạy pipeline cho repo mới qua API.
+These artifacts act as shared memory files that downstream agents can read directly.
 
-```bash
-curl -X POST http://localhost:8000/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"repo_path": "/path/to/project"}'
-```
+## Shared knowledge model
 
-### `GET /health`
+The MVP uses a single shared schema for all consumer agents.
 
-Kiểm tra trạng thái API và FAISS index.
+Core entities:
 
-```bash
-curl http://localhost:8000/health
-```
+- `Repository`
+- `Snapshot`
+- `File`
+- `Module`
+- `Symbol`
+- `Relation`
+- `Summary`
+- `Convention`
+- `RiskArea`
 
-### 📖 Interactive Docs
+This model keeps the knowledge base generic enough for multiple agents while still preserving enough structure for agent-specific retrieval.
 
-Truy cập `http://localhost:8000/docs` để xem Swagger UI.
+## Agent profiles
 
----
-
-## 📦 Kết quả đầu ra
+Each consumer agent uses a profile to decide:
 
-Sau khi chạy pipeline, thư mục `output/` chứa:
+- which entities to prioritize
+- which relations matter most
+- whether conventions should be included
+- whether risks should be included
+- whether related files should be included
+- how retrieval results should be ranked
+- what summary depth is needed
 
-| File | Mô tả |
-|------|-------|
-| `summaries.md` | Báo cáo tóm tắt dễ đọc cho người |
-| `summaries.json` | Dữ liệu có cấu trúc cho máy |
-| `faiss_index/index.faiss` | FAISS vector index |
-| `faiss_index/metadata.pkl` | Metadata (summaries + embeddings) |
+The MVP should start with three profiles:
 
----
+- `review-agent`
+- `dev-agent`
+- `doc-agent`
 
-## ⚙️ Cấu hình
+The knowledge base is shared.
+The retrieval behavior is profile-specific.
 
-Tất cả cấu hình qua file `.env`:
+## High-level architecture
 
-| Biến | Mô tả | Mặc định |
-|------|-------|----------|
-| `OPENAI_API_KEY` | API key cho LLM | — |
-| `OPENAI_API_BASE` | API base URL | `https://api.openai.com/v1` |
-| `LLM_MODEL` | Model tóm tắt | `gpt-4o-mini` |
-| `EMBEDDING_MODEL` | Model embedding | `text-embedding-3-small` |
-| `OUTPUT_DIR` | Thư mục output | `./output` |
-| `CHUNK_MAX_LINES` | Số dòng tối đa/chunk | `500` |
-| `API_HOST` | API host | `0.0.0.0` |
-| `API_PORT` | API port | `8000` |
-| `DEFAULT_TOP_K` | Số kết quả tìm kiếm mặc định | `5` |
+At a high level, the system works like this:
 
----
+1. Read repository metadata and current revision
+2. Walk the repository tree with skip rules
+3. Detect languages and parse supported files
+4. Extract structural entities and relations
+5. Generate summaries at file, module, and symbol levels
+6. Detect conventions and risk areas
+7. Build embeddings and semantic indexes
+8. Write a snapshot package atomically
+9. Let consumer agents query the snapshot through profiles
 
-## 🔑 Nguyên tắc thiết kế
+## Tech stack direction
 
-1. ✅ **Không tải toàn bộ repo vào LLM** — xử lý từng chunk một
-2. ✅ **Chunking trước** — code được chia nhỏ trước khi gọi LLM
-3. ✅ **Modular** — mỗi module một trách nhiệm duy nhất
-4. ✅ **API để bot khác truy vấn** — FastAPI `/context` endpoint
-5. ✅ **Triple storage** — Markdown, JSON, FAISS vector database
+Current MVP direction:
 
----
+- `Python 3.12`
+- `Pydantic v2`
+- `tree-sitter`
+- `JSON/JSONL` for structured artifact storage
+- local vector index behind an internal abstraction
+- provider-agnostic adapters for embeddings and LLMs
+- `pytest`
+- `ruff`
+- `black`
+- `mypy`
 
-## 🧰 Tech Stack
+This stack is chosen to:
 
-| Thành phần | Công nghệ | Mục đích |
-|-----------|-----------|----------|
-| **Language** | Python 3.10+ | Ngôn ngữ chính |
-| **Web Framework** | FastAPI | API server hiệu năng cao, auto-docs |
-| **ASGI Server** | Uvicorn | Chạy FastAPI |
-| **LLM** | NVIDIA NIM (`meta/llama-3.1-8b-instruct`) | Tóm tắt code chunks (miễn phí) |
-| **Embeddings** | HuggingFace `all-MiniLM-L6-v2` (local) | Vector hóa summaries (offline, miễn phí) |
-| **Vector DB** | FAISS (faiss-cpu) | Lưu trữ & tìm kiếm vector similarity |
-| **LLM Framework** | LangChain (langchain-openai, langchain-community) | Quản lý LLM calls, embeddings |
-| **Data** | NumPy, Pickle | Xử lý ma trận embeddings, serialize metadata |
-| **HTTP Client** | httpx | API client |
-| **Config** | python-dotenv | Load cấu hình từ `.env` |
+- move quickly on the MVP
+- fit parsing and AI workflow needs
+- avoid early lock-in to one provider or serving layer
+- keep the architecture open for later expansion
 
-### Kiến trúc dữ liệu
+## Shared memory strategy
 
-```
-Code File → Parser → Chunker → LLM Summarizer → Storage
-                                                    ├── Markdown (.md)      ← Human-readable
-                                                    ├── JSON (.json)        ← Machine-readable
-                                                    └── FAISS (index.faiss) ← Vector search
-```
+The long-term direction is to treat shared memory as a combination of:
 
----
+- a structured knowledge layer
+- a semantic retrieval layer
 
-## 🔮 Hướng phát triển tương lai
+The structured layer remains the source of truth for:
 
-> 📋 **Kế hoạch nâng cấp chi tiết:** Xem [docs/UPGRADE_PLAN.md](docs/UPGRADE_PLAN.md) — Quality Output & PR Ingest API
+- repository and snapshot identity
+- files, modules, and symbols
+- relations and dependency structure
+- conventions and risk areas
 
-### Giai đoạn 1 — Cải thiện core
-- [ ] **AST parsing mở rộng**: Hỗ trợ Java, Go, Rust bằng tree-sitter thay vì regex
-- [ ] **Incremental indexing**: Chỉ re-index file thay đổi, không rebuild toàn bộ
-- [ ] **Streaming summaries**: Hiển thị tóm tắt real-time qua WebSocket khi đang xử lý
-- [ ] **Cache LLM responses**: Tránh gọi LLM lại cho code không thay đổi
+The vector database is intended to act as a `semantic memory layer`, not as the entire knowledge base.
 
-### Giai đoạn 2 — Tăng cường AI
-- [ ] **Multi-repo support**: Phân tích nhiều repo, tạo knowledge graph liên project
-- [ ] **Code relationship mapping**: Phát hiện dependency giữa các chunk/module
-- [ ] **Architecture diagram generation**: Tự động vẽ sơ đồ kiến trúc từ summaries
-- [ ] **RAG-enhanced Q&A**: Kết hợp vector search với LLM để trả lời câu hỏi về code
-- [ ] **Local LLM support**: Tích hợp Ollama/llama.cpp cho môi trường không có internet
+It will be used for:
 
-### Giai đoạn 3 — Nền tảng
-- [ ] **Authentication & API keys**: Bảo vệ endpoint bằng JWT/API key
-- [ ] **Multi-tenant**: Nhiều user/project riêng biệt
-- [ ] **Web Dashboard**: UI trực quan để xem summaries, tìm kiếm, quản lý repos
-- [ ] **Plugin system**: Cho phép mở rộng parser/chunker cho ngôn ngữ/framework mới
-- [ ] **CI/CD integration**: GitHub Action tự động re-index khi push code
-- [ ] **Database persistence**: Lưu metadata vào PostgreSQL/SQLite thay vì pickle files
-- [ ] **Docker deployment**: Dockerfile + docker-compose cho deployment dễ dàng
+- semantic retrieval of relevant summaries
+- natural-language search over project knowledge
+- ranking candidate context for downstream agents
 
-### Giai đoạn 4 — Ecosystem
-- [ ] **MCP Server**: Biến hệ thống thành MCP tool cho Claude/Cursor/VS Code
-- [ ] **CLI enhancement**: Interactive mode, search trực tiếp từ terminal
-- [ ] **IDE extensions**: VS Code extension để query context ngay trong editor
-- [ ] **Team knowledge base**: Chia sẻ knowledge giữa team members
-- [ ] **Code review assistant**: Tự động review PR dựa trên project knowledge
+It should not replace the structured layer for:
 
----
+- deterministic entity lookup
+- snapshot versioning
+- relation integrity
+- change impact analysis
 
-## 🛠️ Ngôn ngữ được hỗ trợ
+In practice, the expected direction is:
 
-Python, JavaScript, TypeScript, Java, Go, Rust, C, C++, C#, Ruby, PHP, Swift, Kotlin, Scala, Shell, SQL, và hơn nữa.
+`Structured Knowledge Base + Vector Database -> Shared Memory for AI Agents`
 
----
+## Success criteria
 
-## 📄 License
+The MVP is successful when it can:
 
-MIT
+1. ingest a repository into a valid knowledge snapshot
+2. validate the snapshot against a clear schema
+3. support multiple consumer profiles on the same snapshot
+4. give `Review Agent` enough context to review changes without rereading the whole repository
+5. let `Dev Agent` and `Doc Agent` reuse the same knowledge base with different retrieval behavior
+
+## Documentation
+
+Current project documents:
+
+- [MVP Specification](docs/MVP.md)
+
+Planned next documents:
+
+- `docs/ARCHITECTURE.md`
+- `docs/SCHEMA.md`
+- `docs/AGENT_PROFILES.md`
+- `docs/INGEST_FLOW.md`
+
+## Roadmap after MVP
+
+- incremental ingest based on file hashes
+- active snapshot management
+- richer dependency graph support
+- vector database as a semantic memory layer on top of structured knowledge
+- PR-aware retrieval flows
+- optional live API or service layer
+- multi-branch and multi-repo support
+- observability
+- policy engine per agent type
+
+## Project statement
+
+> Project Understanding System turns a codebase into a shared, structured, versioned knowledge base so that multiple AI agents can query and use project understanding through their own configuration, instead of rereading the full source code every time.

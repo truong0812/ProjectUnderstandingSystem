@@ -1,1 +1,0 @@
-"""Parser module — parse repository files."""
