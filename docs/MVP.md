@@ -591,5 +591,99 @@ Lý do chọn:
 > MVP của dự án là một hệ thống chuyển codebase thành shared, structured, versioned knowledge base ở dạng file-based shared memory, để nhiều AI agents có thể truy vấn và sử dụng thông qua profile cấu hình riêng, thay vì phải đọc lại toàn bộ source code mỗi lần làm việc.
 >
 > MVP được triển khai qua 3 phase: (1) Ingest + Structured Snapshot, (2) Agent Profile + Structured Retrieval, (3) Semantic Search + Enrichment. Mỗi phase đều deliver giá trị độc lập.
+
+---
+
+## 18. Implementation Status (Updated: 2026-05-05)
+
+### ✅ Phase 1: Codebase Ingest + Structured Snapshot — COMPLETE
+
+**Thực hiện:**
+- Scanner với `.gitignore`-aware skip rules
+- Language detection: Python, TypeScript, C#
+- Tree-sitter–based entity extraction (functions, classes, methods, imports)
+- Relation builder: imports, calls, contains, depends_on, inherits
+- LLM-powered summarization (OpenAI-compatible adapter) + heuristic fallback
+- Concurrent LLM summarization với ThreadPoolExecutor (10 workers)
+- `--no-enrichment` flag để skip symbol/module enrichment (tối ưu thời gian)
+- Snapshot package: JSON storage (files, symbols, relations, summaries)
+- CLI: `pus ingest`, `pus list`, `pus show`
+
+**Kiểm chứng thực tế (self-ingest — heuristic):**
+```
+Snapshot: fb56df2432702a09
+  Files: 47 | Symbols: 257 | Relations: 304 | Summaries: 304
+  Time: 0.8s
+```
+
+### ✅ Phase 2: Agent Profile + Structured Retrieval — COMPLETE
+
+**Thực hiện:**
+- Agent profile model (entities, relations, ranking, limits)
+- 3 default profiles: `review-agent`, `dev-agent`, `doc-agent`
+- Retrieval engine với 4 query primitives:
+  - `file_context(path, profile)` — file + symbols + related files
+  - `symbol_context(name, profile)` — symbol + containing file + siblings
+  - `module_context(name, profile)` — module + files + symbols
+  - `change_context(files, profile)` — changed files + impact analysis
+- Context bundle với relevance scoring và agent-readable output
+- CLI: `pus query file|symbol|module|changes`, `pus profiles`
+
+### ✅ Phase 3: Semantic Search + Enrichment — COMPLETE
+
+**Thực hiện:**
+- TF-IDF–based semantic index với cosine similarity (zero-dependency, pure Python)
+- Symbol-level + module-level summaries (heuristic + LLM enrichment)
+- Convention detection: naming patterns, test file patterns, docstring patterns
+- Risk area detection: large files, deep nesting, God classes, high complexity
+- `semantic_context(query, profile)` retrieval primitive
+- Pipeline enrichment: conventions, risks, semantic index built during ingest
+- CLI: `pus query semantic "query" --repo <id> --top-k N`
+
+
+### CLI Reference
+
+```bash
+# Ingest
+pus ingest <repo_path> [--no-llm] [--no-enrichment] [--output-dir DIR]
+
+# Query
+pus query file <path> --repo <repo_id> [--profile <name>] [--json]
+pus query symbol <name> --repo <repo_id> [--profile <name>] [--json]
+pus query module <name> --repo <repo_id> [--profile <name>] [--json]
+pus query changes --files <f1> <f2> --repo <repo_id> [--profile <name>] [--json]
+pus query semantic "<query>" --repo <repo_id> [--profile <name>] [--top-k N] [--json]
+
+# Management
+pus list <repo_id>
+pus show <repo_id> [--snapshot-id <id>]
+pus profiles
+pus version
+```
+
+### Completed Criteria Checklist
+
+| # | Tiêu chí | Status |
+|---|----------|--------|
+| Phase 1.1 | Ingest repo và tạo snapshot thành công | ✅ |
+| Phase 1.2 | Snapshot có schema rõ ràng, validate bằng Pydantic | ✅ |
+| Phase 1.3 | Entities (File, Module, Symbol) được extract đúng | ✅ |
+| Phase 1.4 | Relations cơ bản (contains, imports, calls, depends_on) được build | ✅ |
+| Phase 1.5 | File-level summary được generate cho mỗi file | ✅ |
+| Phase 2.1 | Chạy query bằng profile khác nhau | ✅ |
+| Phase 2.2 | Review Agent lấy context đủ để review thay đổi | ✅ |
+| Phase 2.3 | Dev Agent và Doc Agent dùng cùng snapshot với profile riêng | ✅ |
+| Phase 2.4 | Context bundle materialize thành JSON hợp lệ | ✅ |
+| Phase 3.1 | Semantic search hoạt động trên summaries | ✅ |
+| Phase 3.2 | Convention detection cho ≥3 pattern phổ biến | ✅ |
+| Phase 3.3 | Risk area detection cho ≥3 vùng rủi ro | ✅ |
+| Phase 3.4 | Symbol-level và module-level summary được generate | ✅ |
+
+### Lessons Learned
+
+1. **LLM timeout issue:** Concurrent LLM enrichment (254 symbols) có thể mất >10 phút. Giải pháp: `--no-enrichment` flag để skip, chỉ dùng file-level LLM summaries.
+2. **Worker count:** Tăng từ 5 → 10 workers giúp giảm thời gian summarization ~50%.
+3. **C# parser:** Tree-sitter C# grammar hoạt động tốt với Xamarin/MAUI projects.
+4. **File-based storage:** Snapshot JSON (~458KB cho 131 files) đủ nhỏ để load nhanh vào memory.
 </task_progress>
 </write_to_file>
