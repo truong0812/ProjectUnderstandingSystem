@@ -1,137 +1,49 @@
 """Business glossary for domain-specific context detection.
 
-Maps logistics/airport cargo domain terms to Vietnamese descriptions.
-Used by the summarizer to add business_context to summaries.
+.. deprecated::
+    This module is deprecated. Use the domain plugin system instead:
+
+        from project_understanding.ingest.domain_plugins import registry
+        metadata = registry.detect_all(code, max_terms=5)
+
+    The logistics/cargo glossary is now available as a plugin at:
+        from project_understanding.ingest.domain_plugins.logistics_vi import LogisticsViPlugin
+
+This module is kept for backward compatibility and will be removed in a future version.
 """
 
 from __future__ import annotations
 
-import re
+import warnings
 
-
-# Domain keyword -> Vietnamese business context
-BUSINESS_GLOSSARY: dict[str, str] = {
-    # Airport cargo operations
-    "ramp": "Khu vực bãi đỗ hàng hóa tại sân bay (RAMP)",
-    "uld": "Unit Load Device - Contain tiêu chuẩn vận chuyển hàng không",
-    "inbound": "Hàng hóa nhập vào (Inbound) - Hàng đến từ chuyến bay",
-    "outbound": "Hàng hóa xuất ra (Outbound) - Hàng chuẩn bị lên chuyến bay",
-    "awb": "Air Waybill - Vận đơn hàng không",
-    "mawb": "Master Air Waybill - Vận đơn chính",
-    "hawb": "House Air Waybill - Vận đơn phụ",
-    "flight": "Chuyến bay vận chuyển hàng hóa",
-    "manifest": "Manifest - Danh sách hàng hóa trên chuyến bay",
-    "cargo": "Hàng hóa vận chuyển qua đường hàng không",
-    "ecargo": "Hệ thống quản lý hàng hóa điện tử (eCargo)",
-    "freight": "Hàng hóa vận chuyển (freight/cargo)",
-    "shipment": "Lô hàng vận chuyển",
-    "consignment": "Lô hàng ủy thác vận chuyển",
-    "booking": "Đặt chỗ vận chuyển hàng hóa",
-    "warehouse": "Kho hàng tại sân bay",
-    "terminal": "Nhà ga hàng hóa tại sân bay",
-    " customs": "Hải quan - Xử lý thủ tục hải quan",
-    "clearance": "Thông quan - Hoàn thành thủ tục hải quan",
-    "inspection": "Kiểm tra hàng hóa (soi chiếu, kiểm đếm)",
-    "weighing": "Cân trọng lượng hàng hóa",
-    "dimension": "Kích thước hàng hóa (dài × rộng × cao)",
-    "volumetric": "Trọng lượng thể tích - Quy đổi từ kích thước sang trọng lượng",
-    "chargeable": "Trọng lượng tính cước - Lấy max(trọng lượng thực tế, trọng lượng thể tích)",
-    "pallet": "Pallet - Bệ đỡ hàng hóa để xếp lên máy bay",
-    "net": "Lưới buộc hàng trên pallet",
-    "strapping": "Dây đai buộc hàng trên pallet/ULD",
-    "barcode": "Mã vạch - Quét barcode để tracking hàng hóa",
-    "qrcode": "Mã QR - Quét QR code để tracking",
-    "scan": "Quét mã vạch/QR để xác nhận hàng hóa",
-    "tracking": "Theo dõi trạng thái hàng hóa (tracking)",
-    "status": "Trạng thái xử lý hàng hóa",
-    "handheld": "Thiết bị handheld - Máy quét cầm tay cho nhân viên bãi",
-    "signature": "Chữ ký điện tử xác nhận giao nhận hàng",
-    "photo": "Chụp ảnh hàng hóa làm bằng chứng giao nhận",
-    "damage": "Hàng hư hỏng - Ghi nhận tình trạng hư hỏng",
-    "exception": "Ngoại lệ xử lý hàng (hư hỏng, thiếu, sai)",
-    "seal": "Chì niêm phong contain/ULD",
-    "departure": "Chuyến bay khởi hành (departure)",
-    "arrival": "Chuyến bay đến (arrival)",
-    "transit": "Hàng quá cảnh (transit)",
-    "transfer": "Hàng chuyển tiếp (transfer) giữa các chuyến bay",
-    "delivery": "Giao hàng cho người nhận",
-    "pickup": "Nhận hàng từ người gửi",
-    "agent": "Đại lý vận chuyển hàng hóa",
-    "carrier": "Hãng hàng không vận chuyển",
-    "shipper": "Người gửi hàng (shipper)",
-    "consignee": "Người nhận hàng (consignee)",
-    "notify": "Thông báo cho bên liên quan (người gửi/nhận)",
-    "document": "Chứng từ hàng hóa (vận đơn, hóa đơn, packing list)",
-    "invoice": "Hóa đơn thương mại",
-    "packing": "Packing list - Danh sách đóng gói hàng hóa",
-    "permit": "Giấy phép vận chuyển hàng đặc biệt",
-    "dangerous": "Hàng nguy hiểm (DG - Dangerous Goods)",
-    "dg": "Dangerous Goods - Hàng nguy hiểm",
-    "lithium": "Pin lithium - Hàng nguy hiểm loại pin",
-    "perishable": "Hàng dễ hỏng (thực phẩm, hoa tươi)",
-    "live_animal": "Động vật sống - Hàng đặc biệt",
-    "pharma": "Hàng dược phẩm - Cần kiểm soát nhiệt độ",
-    "cool": "Hàng cần kiểm soát nhiệt độ (cool chain)",
-    "temperature": "Nhiệt độ lưu trữ/vận chuyển hàng",
-    "tally": "Kiểm đếm hàng hóa",
-    "buildup": "Build-up - Xếp hàng vào ULD/pallet",
-    "breakdown": "Break-down - Dỡ hàng từ ULD/pallet",
-    "load": "Nạp hàng lên máy bay (loading)",
-    "unload": "Dỡ hàng từ máy bay (unloading)",
-    "irregularity": "Bất thường trong xử lý hàng",
-    "claim": "Khiếu nại đền bù hàng hư hỏng/mất",
-    "report": "Báo cáo thống kê hàng hóa",
-}
-
-# Pre-compiled regex patterns for fast matching
-_GLOSSARY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(rf"(?i)\b{re.escape(kw)}\b"), desc)
-    for kw, desc in BUSINESS_GLOSSARY.items()
-    if len(kw) >= 3  # Skip very short keywords
-]
-
-# Also compile for short keywords (exact word boundary)
-_SHORT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(rf"(?i)\b{re.escape(kw)}\b"), desc)
-    for kw, desc in BUSINESS_GLOSSARY.items()
-    if len(kw) < 3
-]
+from project_understanding.ingest.domain_plugins import registry as _registry
+from project_understanding.ingest.domain_plugins.logistics_vi import LogisticsViPlugin
 
 
 def detect_business_context(code: str, max_terms: int = 5) -> str:
-    """Detect business domain terms in code and return Vietnamese context.
+    """Detect business domain terms in code and return context string.
+
+    .. deprecated::
+        Use ``detect_domain_llm()`` from ``domain_detector`` instead,
+        which provides LLM-based domain detection for ANY domain.
 
     Args:
         code: Source code or file content to analyze.
         max_terms: Maximum number of terms to include in context.
 
     Returns:
-        Vietnamese business context string, or empty string if no terms found.
+        Formatted context string, or empty string if no terms found.
     """
-    found: dict[str, str] = {}
-
-    # Check longer patterns first (more specific)
-    for pattern, description in _GLOSSARY_PATTERNS:
-        if pattern.search(code):
-            # Extract the keyword from description for dedup key
-            key = description.split(" - ")[0] if " - " in description else description
-            if key not in found:
-                found[key] = description
-            if len(found) >= max_terms:
-                break
-
-    # Check short patterns
-    for pattern, description in _SHORT_PATTERNS:
-        if pattern.search(code):
-            key = description.split(" - ")[0] if " - " in description else description
-            if key not in found:
-                found[key] = description
-            if len(found) >= max_terms:
-                break
-
+    warnings.warn(
+        "detect_business_context() is deprecated. "
+        "Use project_understanding.ingest.domain_detector.detect_domain_llm() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    # Ensure logistics plugin is loaded for backward compatibility
+    if _registry.get("logistics_vi") is None:
+        _registry.register(LogisticsViPlugin())
+    found = _registry.detect_all(code, max_terms=max_terms)
     if not found:
         return ""
-
-    # Format as Vietnamese context
-    parts = list(found.values())[:max_terms]
-    return "Nghiệp vụ: " + "; ".join(parts)
+    return "Nghiệp vụ: " + "; ".join(found.values())

@@ -25,6 +25,7 @@ from project_understanding.ingest.parser_base import ParsedFile
 from project_understanding.ingest.relation_builder import build_all_relations
 from project_understanding.ingest.scanner import scan_repository
 from project_understanding.ingest.summarizer import generate_file_summary
+from project_understanding.ingest.domain_detector import detect_domain_llm
 from project_understanding.ingest.convention_detector import detect_conventions
 from project_understanding.ingest.risk_detector import detect_risks
 from project_understanding.ingest.enrichment import generate_symbol_summaries, generate_module_summaries
@@ -295,6 +296,13 @@ def ingest_repository(
         except Exception:
             llm = None
 
+    # --- Step 4.5: Detect business domain via LLM (1 call, shared across all summaries) ---
+    domain_metadata: dict[str, str] = {}
+    if llm:
+        code_samples = [c for c in file_contents.values() if c.strip()][:10]
+        if code_samples:
+            domain_metadata = detect_domain_llm(code_samples, llm)
+
     if llm:
         # Concurrent LLM summarization (5 workers)
         import threading
@@ -305,7 +313,7 @@ def ingest_repository(
             idx, file_entity = idx_file
             content = file_contents.get(file_entity.file_id, "")
             syms = file_symbols.get(file_entity.file_id, [])
-            summary = generate_file_summary(file_entity, content, syms, llm)
+            summary = generate_file_summary(file_entity, content, syms, llm, domain_metadata=domain_metadata)
             with _lock:
                 _completed[0] += 1
                 if progress_callback:
@@ -329,7 +337,7 @@ def ingest_repository(
             content = file_contents.get(file_entity.file_id, "")
             syms = file_symbols.get(file_entity.file_id, [])
 
-            summary = generate_file_summary(file_entity, content, syms, None)
+            summary = generate_file_summary(file_entity, content, syms, None, domain_metadata=domain_metadata)
             summaries.append(summary)
 
     if not no_enrichment:

@@ -18,7 +18,7 @@ Dự án có kiến trúc tốt, module hóa rõ ràng. Sau khi phân tích toà
 
 | # | Vấn đề | File(s) | Hành động | Status |
 |---|--------|---------|-----------|--------|
-| 1.1 | **Hardcoded business domain (Logistics/Cargo)** | `ingest/business_glossary.py`, `ingest/summarizer.py`, `models/summaries.py` | Tách `business_glossary.py` thành plugin/domain profile. Bỏ `business_context` field khỏi `Summary` model (hoặc làm generic `metadata: dict`). Bỏ sentence logistics tiếng Việt khỏi `SYSTEM_PROMPT`. | ⬜ |
+| 1.1 | **Hardcoded business domain (Logistics/Cargo)** | `ingest/business_glossary.py`, `ingest/summarizer.py`, `models/summaries.py`, `ingest/domain_detector.py`, `ingest/domain_plugins/__init__.py`, `ingest/pipeline.py` | Tách `business_glossary.py` thành plugin/domain profile. Bỏ `business_context` field khỏi `Summary` model (hoặc làm generic `metadata: dict`). Bỏ sentence logistics tiếng Việt khỏi `SYSTEM_PROMPT`. **Thêm LLM-based domain detection** (`domain_detector.py`) — tự động phát hiện domain của BẤT KỲ dự án nào qua 1 LLM call, không cần predefined catalog. Global registry bắt đầu rỗng, deprecated shim vẫn backward-compatible. | ✅ |
 | 1.2 | **Silent exception swallowing** | `pipeline.py`, `storage/snapshot_storage.py` | Thay `except Exception: pass` bằng `logging.warning()` hoặc `logging.error()`. Raise exception ở những chỗ cần fail-fast. | ⬜ |
 | 1.3 | **LLM error handling trả string** | `adapters/llm_openai_compatible.py`, `ingest/summarizer.py` | Tạo custom `LLMError` exception. `generate()` raise exception thay vì return error string. Caller dùng try/except thay vì `startswith("[LLM Error:")`. | ⬜ |
 
@@ -61,24 +61,34 @@ Dự án có kiến trúc tốt, module hóa rõ ràng. Sau khi phân tích toà
 
 ## 3. Chi tiết kỹ thuật
 
-### 3.1 Tách Business Glossary thành Plugin
+### 3.1 Tách Business Glossary → LLM-Based Domain Detection ✅
 
-**Hiện tại:**
+**Trước (hardcoded):**
 ```
 summarizer.py → imports business_glossary.detect_business_context()
 models/summaries.py → Summary.business_context field
+domain_plugins/__init__.py → registry.register(LogisticsViPlugin())  # hardcoded!
 ```
 
-**Mục tiêu:**
+**Sau (LLM auto-detect, hoàn thành):**
 ```
-plugins/domain_glossary/
-    ├── __init__.py
-    ├── base.py          # DomainGlossaryPlugin interface
-    └── logistics_vi.py  # Logistics glossary (current code)
+ingest/domain_detector.py      [MỚI] LLM-based domain detection (1 call/project)
+    → detect_domain_llm(samples, llm) → {term: description}
 
-summarizer.py → gọi plugin registry (optional)
-models/summaries.py → Summary.metadata: dict[str, str] (generic)
+ingest/domain_plugins/
+    ├── __init__.py             Global registry bắt đầu RỖNG + BUILTIN_PLUGINS catalog
+    ├── base.py                 DomainGlossaryPlugin interface (giữ nguyên)
+    └── logistics_vi.py         Logistics glossary (giữ nguyên, dùng qua catalog)
+
+ingest/summarizer.py            Nhận domain_metadata từ bên ngoài (param)
+ingest/pipeline.py              Gọi detect_domain_llm() 1 lần → truyền cho tất cả summaries
+models/summaries.py             Summary.metadata: dict[str, str] (generic)
+
+ingest/business_glossary.py     [DEPRECATED] Shim tự load logistics plugin khi cần
 ```
+
+**Flow:** Scan → Lấy 10 file samples → 1 LLM call → domain metadata → share cho tất cả summaries
+**Fallback:** Không có LLM → metadata = {} (sạch, không domain cụ thể)
 
 ### 3.2 Error Handling Pattern
 

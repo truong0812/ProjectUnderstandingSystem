@@ -92,3 +92,23 @@ class TestGenerateFileSummary:
         summary = generate_file_summary(f, "", [])
         assert summary is not None
         assert summary.content != ""
+
+    def test_summary_with_domain_metadata(self):
+        """Summary should include provided domain metadata."""
+        f = _make_file()
+        metadata = {"shipment": "Lô hàng vận chuyển", "warehouse": "Kho hàng"}
+        summary = generate_file_summary(f, "code content", [], domain_metadata=metadata)
+        assert summary.metadata == metadata
+        assert "shipment" in summary.metadata
+
+    def test_summary_without_domain_metadata_defaults_empty(self):
+        """Without domain_metadata, metadata should be empty dict."""
+        f = _make_file()
+        summary = generate_file_summary(f, "code content", [])
+        assert summary.metadata == {}
+
+    def test_summary_domain_metadata_none_defaults_empty(self):
+        """Passing None for domain_metadata should result in empty dict."""
+        f = _make_file()
+        summary = generate_file_summary(f, "code content", [], domain_metadata=None)
+        assert summary.metadata == {}

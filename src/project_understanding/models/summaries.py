@@ -49,9 +49,9 @@ class Summary(BaseModel):
         default="",
         description="Programming language of the target (for file/symbol summaries)",
     )
-    business_context: str = Field(
-        default="",
-        description="Business domain context in Vietnamese (e.g., logistics, airport cargo operations)",
+    metadata: dict[str, str] = Field(
+        default_factory=dict,
+        description="Arbitrary metadata for the summary (e.g., domain context from glossary plugins)",
     )
 
     @staticmethod
