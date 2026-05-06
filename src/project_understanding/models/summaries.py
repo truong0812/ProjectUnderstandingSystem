@@ -49,6 +49,10 @@ class Summary(BaseModel):
         default="",
         description="Programming language of the target (for file/symbol summaries)",
     )
+    business_context: str = Field(
+        default="",
+        description="Business domain context in Vietnamese (e.g., logistics, airport cargo operations)",
+    )
 
     @staticmethod
     def make_summary_id(target_id: str, level: SummaryLevel) -> str:

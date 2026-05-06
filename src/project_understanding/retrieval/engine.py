@@ -497,6 +497,11 @@ class RetrievalEngine:
             f"{query_type}:{query_params}:{profile.name}:{self._package.snapshot.snapshot_id}".encode()
         ).hexdigest()[:16]
 
+        # Include glossary if available and profile wants it
+        glossary_context = ""
+        if getattr(profile, "include_glossary", True):
+            glossary_context = self._package.glossary.to_agent_context()
+
         return ContextBundle(
             bundle_id=bundle_id,
             query_type=query_type,
@@ -506,6 +511,7 @@ class RetrievalEngine:
             repo_id=self._package.repository.repo_id,
             items=items,
             relations=relations[:profile.max_items],
+            glossary_context=glossary_context,
             total_files=file_count,
             total_symbols=sym_count,
             total_modules=mod_count,

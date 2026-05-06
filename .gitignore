@@ -32,6 +32,7 @@ Thumbs.db
 
 # Project output
 output/
+Knowledge/
 snapshots/
 .snapshots/
 data/

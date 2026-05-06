@@ -28,6 +28,7 @@ from project_understanding.ingest.summarizer import generate_file_summary
 from project_understanding.ingest.convention_detector import detect_conventions
 from project_understanding.ingest.risk_detector import detect_risks
 from project_understanding.ingest.enrichment import generate_symbol_summaries, generate_module_summaries
+from project_understanding.ingest.glossary_generator import generate_glossary
 from project_understanding.retrieval.semantic_index import build_semantic_index, SemanticIndex
 from project_understanding.models.entities import File, Repository, Snapshot, SnapshotStatus, Symbol
 from project_understanding.models.relations import Relation
@@ -35,6 +36,44 @@ from project_understanding.models.snapshot import SnapshotPackage
 from project_understanding.models.summaries import Summary
 from project_understanding.models.conventions import Convention, RiskArea
 from project_understanding.storage.snapshot_storage import SnapshotStorage
+
+
+def _get_project_name(repo_path: str) -> str:
+    """Detect a human-readable project name from git remote or directory.
+
+    Priority:
+        1. Parse basename from git remote URL (strip .git suffix)
+        2. Use directory name of the repo path
+
+    Returns:
+        A clean, filesystem-safe project name (e.g., 'my-project').
+    """
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            cwd=repo_path,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            url = result.stdout.strip()
+            # Extract basename from URL (works for both https and ssh)
+            # e.g., "https://github.com/user/my-project.git" → "my-project"
+            # e.g., "git@github.com:user/my-project.git" → "my-project"
+            name = url.rstrip("/").split("/")[-1]
+            if name.endswith(".git"):
+                name = name[:-4]
+            # Clean for filesystem safety
+            name = "".join(c if c.isalnum() or c in "-_" else "-" for c in name)
+            if name:
+                return name
+    except (subprocess.SubprocessError, FileNotFoundError):
+        pass
+
+    # Fallback: directory name
+    dir_name = Path(repo_path).resolve().name
+    return "".join(c if c.isalnum() or c in "-_" else "-" for c in dir_name)
 
 
 def _get_repo_id(repo_path: str) -> str:
@@ -113,6 +152,7 @@ def ingest_repository(
     output_dir: str | None = None,
     skip_patterns: list[str] | None = None,
     no_enrichment: bool = False,
+    project_name: str | None = None,
     progress_callback=None,
 ) -> SnapshotPackage:
     """Run the full ingestion pipeline on a repository.
@@ -130,6 +170,8 @@ def ingest_repository(
         use_llm: Whether to use LLM for summaries.
         output_dir: Override output directory.
         skip_patterns: Override skip patterns.
+        no_enrichment: Skip symbol/module LLM enrichment.
+        project_name: Human-readable project name (auto-detected if None).
         progress_callback: Optional callback(stage, current, total) for progress.
 
     Returns:
@@ -144,6 +186,7 @@ def ingest_repository(
 
     # --- Step 0: Prepare metadata ---
     repo_id = _get_repo_id(repo_path)
+    resolved_project_name = project_name or _get_project_name(repo_path)
     branch, commit_sha = _get_git_info(repo_path)
     snapshot_id = Snapshot.make_snapshot_id(repo_id, branch, commit_sha)
 
@@ -226,11 +269,18 @@ def ingest_repository(
     # --- Step 3: Build modules ---
     modules = create_module_entities(files, snapshot_id, repo_id)
 
+    # Build path -> content mapping (needed for relations + enrichment)
+    path_contents = {}
+    for f in files:
+        content = file_contents.get(f.file_id, "")
+        if content:
+            path_contents[f.path] = content
+
     # --- Step 4: Build relations ---
     if progress_callback:
         progress_callback("building_relations", 0, 1)
 
-    relations = build_all_relations(all_parsed, files, modules, all_symbols, repo_id)
+    relations = build_all_relations(all_parsed, files, modules, all_symbols, repo_id, path_contents)
 
     if progress_callback:
         progress_callback("building_relations", 1, 1)
@@ -282,19 +332,12 @@ def ingest_repository(
             summary = generate_file_summary(file_entity, content, syms, None)
             summaries.append(summary)
 
-    # Build path -> content mapping for enrichment
-    path_contents = {}
-    for f in files:
-        content = file_contents.get(f.file_id, "")
-        if content:
-            path_contents[f.path] = content
-
     if not no_enrichment:
         # --- Step 5b: Symbol-level summaries (Phase 3) ---
         if progress_callback:
             progress_callback("enriching_symbols", 0, 1)
 
-        symbol_summaries = generate_symbol_summaries(all_symbols, files, path_contents, llm)
+        symbol_summaries = generate_symbol_summaries(all_symbols, files, path_contents, llm, progress_callback=progress_callback)
         summaries.extend(symbol_summaries)
 
         if progress_callback:
@@ -332,10 +375,26 @@ def ingest_repository(
     if progress_callback:
         progress_callback("building_index", 0, 1)
 
-    semantic_index = build_semantic_index(summaries, files, all_symbols)
+    semantic_index = build_semantic_index(summaries, files, all_symbols, path_contents)
 
     if progress_callback:
         progress_callback("building_index", 1, 1)
+
+    # --- Step 5g: Generate domain glossary ---
+    if progress_callback:
+        progress_callback("generating_glossary", 0, 1)
+
+    glossary = generate_glossary(
+        files=files,
+        symbols=all_symbols,
+        summaries=summaries,
+        path_contents=path_contents,
+        llm=llm,
+        project_name=resolved_project_name,
+    )
+
+    if progress_callback:
+        progress_callback("generating_glossary", 1, 1)
 
     # --- Step 6: Assemble and write ---
     snapshot.file_count = len(files)
@@ -354,16 +413,17 @@ def ingest_repository(
         summaries=summaries,
         conventions=conventions,
         risks=risks,
+        glossary=glossary,
     )
 
     # Write to disk
     out_dir = output_dir or settings.snapshot_output_dir
     storage = SnapshotStorage(output_dir=out_dir)
-    output_path = storage.write(package)
+    output_path = storage.write(package, project_name=resolved_project_name)
 
     # Save semantic index alongside snapshot
     try:
-        index_dir = Path(out_dir) / repo_id / "indexes"
+        index_dir = Path(out_dir) / resolved_project_name / "indexes"
         semantic_index.save(index_dir / "semantic_index.json")
     except Exception:
         pass  # Non-critical

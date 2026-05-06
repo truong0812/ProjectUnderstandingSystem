@@ -49,6 +49,16 @@ class ParsedCall:
 
 
 @dataclass
+class ParsedUsage:
+    """A symbol usage/reference (constant, variable, type, component reference)."""
+
+    source_symbol: str = ""  # Name of the symbol containing the usage
+    target_name: str = ""     # Name of the referenced symbol
+    usage_kind: str = ""      # "constant", "variable", "type", "component", "identifier"
+    line: int = 0
+
+
+@dataclass
 class ParsedFile:
     """Complete parse result for a single file."""
 
@@ -57,6 +67,7 @@ class ParsedFile:
     symbols: list[ParsedSymbol] = field(default_factory=list)
     imports: list[ParsedImport] = field(default_factory=list)
     calls: list[ParsedCall] = field(default_factory=list)
+    usages: list[ParsedUsage] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
 

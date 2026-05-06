@@ -82,16 +82,33 @@ The first validation consumer is `Review Agent`, but the knowledge model must re
 
 ## Knowledge snapshot output
 
-Each ingest run should create a versioned snapshot package with artifacts such as:
+Each ingest run creates a versioned snapshot package stored on disk:
 
-- `snapshot.json`
-- `entities.jsonl`
-- `relations.jsonl`
-- `summaries.jsonl`
-- `conventions.jsonl`
-- `risks.jsonl`
-- `indexes/`
-- `profiles/`
+```
+output/
+└── <project-name>/
+    ├── snapshots/
+    │   └── 2026-05-06/
+    │       └── snapshot.json    # Complete knowledge snapshot
+    ├── indexes/
+    │   └── semantic_index.json  # TF-IDF semantic index
+    ├── latest.json              # Copy of newest snapshot
+    ├── metadata.json            # Project metadata & stats
+    └── USE_GUIDE.md             # Auto-generated usage guide
+```
+
+The `snapshot.json` file contains all artifacts in a single package:
+
+- `repository` — source repository metadata
+- `snapshot` — snapshot identity and stats
+- `files` — all parsed file entities
+- `modules` — logical module groupings
+- `symbols` — extracted classes, functions, methods
+- `relations` — imports, calls, contains, depends_on, inherits
+- `summaries` — file/symbol/module-level summaries
+- `conventions` — detected coding patterns
+- `risks` — identified risk areas
+- `glossary` — auto-detected domain terminology
 
 These artifacts act as shared memory files that downstream agents can read directly.
 
@@ -316,6 +333,9 @@ pus ingest /path/to/your/repo --no-enrichment
 
 # Specify custom output directory
 pus ingest /path/to/your/repo --no-llm --output-dir ./my-snapshots
+
+# Specify a human-readable project name (auto-detected from git remote if not set)
+pus ingest /path/to/your/repo --project-name my-project --no-llm
 ```
 
 **What happens during ingest:**
@@ -327,7 +347,8 @@ pus ingest /path/to/your/repo --no-llm --output-dir ./my-snapshots
 6. Detect conventions (naming patterns, test files, docstrings)
 7. Detect risk areas (large files, deep nesting, God classes)
 8. Build semantic index (TF-IDF + cosine similarity)
-9. Save snapshot package to disk
+9. Generate domain glossary (auto-detect terminology and acronyms)
+10. Save snapshot package to disk
 
 **Performance flags:**
 - `--no-llm` — Skip all LLM calls, use heuristic summaries only (fastest)
@@ -568,6 +589,7 @@ src/project_understanding/
 │   ├── relations.py             # Relation model with types
 │   ├── summaries.py             # Summary model
 │   ├── conventions.py           # Convention + RiskArea models
+│   ├── glossary.py              # Glossary + GlossaryEntry models
 │   └── snapshot.py              # SnapshotPackage (top-level container)
 ├── ingest/
 │   ├── scanner.py               # Repository walker with skip rules
@@ -583,6 +605,7 @@ src/project_understanding/
 │   ├── enrichment.py            # Symbol + module summary enrichment
 │   ├── convention_detector.py   # Naming/testing/docstring conventions
 │   ├── risk_detector.py         # Large files, complexity, God classes
+│   ├── glossary_generator.py    # Domain terminology auto-detection
 │   └── pipeline.py              # Full ingest pipeline orchestrator
 ├── adapters/
 │   ├── llm_base.py              # Abstract LLM interface
@@ -603,6 +626,73 @@ src/project_understanding/
 - [MVP Specification](docs/MVP.md)
 - [Architecture](docs/ARCHITECTURE.md) *(planned)*
 - [Agent Profiles](docs/AGENT_PROFILES.md) *(planned)*
+
+## Improvements & areas for enhancement
+
+### ✅ Improvements implemented (beyond original MVP scope)
+
+| # | Feature | Description | Files |
+|---|---------|-------------|-------|
+| 1 | **Domain Glossary Generator** | Auto-detects domain-specific terminology, acronyms, and jargon from codebase. Supports LLM-based (with translations) and heuristic modes. 5 categories: domain, technical, acronym, pattern, framework. | `models/glossary.py`, `ingest/glossary_generator.py` |
+| 2 | **Glossary in Context Bundles** | Every query result includes a `glossary_context` field with Markdown-formatted domain terms, helping AI agents understand project-specific vocabulary. | `retrieval/engine.py` |
+| 3 | **Human-readable project naming** | `--project-name` CLI flag + auto-detection from git remote URL. Snapshots stored under readable names instead of hashes. | `cli/main.py`, `ingest/pipeline.py` |
+| 4 | **Date-based snapshot storage** | New structure: `output/<project>/snapshots/YYYY-MM-DD/snapshot.json` with `latest.json`, `metadata.json`. Backward compatible with old hash-based format. | `storage/snapshot_storage.py` |
+| 5 | **Auto-generated USE_GUIDE.md** | Each project gets a usage guide with statistics, query examples, and profile descriptions. Not overwritten on re-ingest. | `storage/snapshot_storage.py` |
+| 6 | **Progress bar during ingest** | CLI shows real-time progress across 8 stages (scanning, parsing, building relations, summarizing, enriching, detecting conventions/risks, building index, generating glossary). | `cli/main.py` |
+| 7 | **Concurrent LLM summarization** | ThreadPoolExecutor with 10 workers for parallel file summarization. Reduces LLM time ~50% vs sequential. | `ingest/pipeline.py` |
+
+### 🔧 Areas needing improvement
+
+#### 1. Testing coverage — Critical
+
+Current state:
+- Only 3 unit test files: `test_models.py`, `test_profiles.py`, `test_summarizer.py`
+- `tests/integration/` directory is empty — **no integration tests**
+- `tests/fixtures/` directory is empty — **no test fixtures**
+
+Needed:
+- [ ] Integration tests for full ingest pipeline (`ingest_repository`)
+- [ ] Unit tests for `RetrievalEngine` (all 5 query primitives)
+- [ ] Unit tests for `SemanticIndex` (build, search, save/load)
+- [ ] Unit tests for `GlossaryGenerator` (LLM + heuristic modes)
+- [ ] Unit tests for `ConventionDetector` and `RiskDetector`
+- [ ] Unit tests for `SnapshotStorage` (write, read, list, delete, legacy compat)
+- [ ] CLI end-to-end tests for all commands
+- [ ] Test fixtures with sample codebases (Python, TypeScript, C#)
+
+#### 2. Documentation — Incomplete
+
+- [ ] `docs/ARCHITECTURE.md` — planned but not created
+- [ ] `docs/AGENT_PROFILES.md` — planned but not created
+- [x] Glossary feature documented in README (improvements table + snapshot output + ingest steps)
+- [x] `--project-name` CLI flag shown in usage examples
+- [x] Project structure in README includes `glossary_generator.py` and `glossary.py`
+
+#### 3. Performance — O(n) linear scans
+
+- `RetrievalEngine` iterates over ALL symbols for every file/symbol/module query (no pre-built index)
+- Semantic index is rebuilt on every query if not loaded from disk
+- Needed: pre-build `file_id → [symbols]` lookup in `RetrievalEngine.__init__`
+- Needed: cache semantic index load in retrieval queries
+
+#### 4. CI/CD & code quality enforcement
+
+- [ ] No `.github/workflows` for automated testing
+- [ ] No pre-commit hooks configured
+- [ ] `ruff`, `black`, `mypy` configured in `pyproject.toml` but not enforced in CI
+- [ ] Empty `profiles/` directory at project root should be cleaned up
+
+#### 5. Roadmap features (post-MVP)
+
+- [ ] Incremental ingest based on file hashes (only re-process changed files)
+- [ ] Active snapshot management (prune old snapshots, diff between snapshots)
+- [ ] Richer dependency graph support (call graph visualization)
+- [ ] Vector database as semantic memory layer (replace/augment TF-IDF with real embeddings)
+- [ ] PR-aware retrieval flows (diff analysis, change impact scoring)
+- [ ] Optional live API or service layer
+- [ ] Multi-branch and multi-repo support
+- [ ] Observability (logging, metrics, tracing)
+- [ ] Policy engine per agent type
 
 ## Roadmap after MVP
 

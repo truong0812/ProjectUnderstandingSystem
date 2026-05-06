@@ -11,6 +11,7 @@ from project_understanding.models.entities import File, Module, Repository, Snap
 from project_understanding.models.relations import Relation
 from project_understanding.models.summaries import Summary
 from project_understanding.models.conventions import Convention, RiskArea
+from project_understanding.models.glossary import Glossary
 
 
 class SnapshotPackage(BaseModel):
@@ -29,3 +30,4 @@ class SnapshotPackage(BaseModel):
     summaries: list[Summary] = Field(default_factory=list, description="All summaries in the snapshot")
     conventions: list[Convention] = Field(default_factory=list, description="Detected conventions (Phase 3)")
     risks: list[RiskArea] = Field(default_factory=list, description="Detected risk areas (Phase 3)")
+    glossary: Glossary = Field(default_factory=Glossary, description="Auto-detected domain glossary")

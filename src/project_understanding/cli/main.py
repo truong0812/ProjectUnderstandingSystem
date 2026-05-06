@@ -43,6 +43,7 @@ def _progress_callback(stage: str, current: int, total: int) -> None:
         "detecting_conventions": "Detecting conventions",
         "detecting_risks": "Detecting risks",
         "building_index": "Building semantic index",
+        "generating_glossary": "Generating domain glossary",
     }
     label = stage_labels.get(stage, stage)
 
@@ -56,9 +57,12 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     repo_path = args.repo_path
     use_llm = not args.no_llm
     output_dir = args.output_dir
+    project_name = getattr(args, 'project_name', None)
     no_enrichment = getattr(args, 'no_enrichment', False)
 
     print(f"[...] Ingesting repository: {repo_path}", file=sys.stderr)
+    if project_name:
+        print(f"  Project name: {project_name}", file=sys.stderr)
     if not use_llm:
         print("  (LLM summarization disabled, using heuristics)", file=sys.stderr)
     if no_enrichment:
@@ -72,6 +76,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             use_llm=use_llm,
             output_dir=output_dir,
             no_enrichment=no_enrichment,
+            project_name=project_name,
             progress_callback=_progress_callback,
         )
     except Exception as e:
@@ -276,6 +281,7 @@ def main(argv: list[str] | None = None) -> int:
     ingest_parser.add_argument("--no-llm", action="store_true", help="Disable LLM summarization")
     ingest_parser.add_argument("--no-enrichment", action="store_true", help="Skip symbol/module LLM enrichment")
     ingest_parser.add_argument("--output-dir", default=None, help="Output directory")
+    ingest_parser.add_argument("--project-name", default=None, help="Human-readable project name (auto-detected from git remote if not set)")
 
     # list
     list_parser = subparsers.add_parser("list", help="List snapshots for a repository")

@@ -4,7 +4,8 @@ Provides embedding-based semantic search over summaries using
 TF-IDF + cosine similarity as the default backend. Can be swapped
 to use real embeddings (OpenAI, etc.) when available.
 
-The index is built from summaries and supports natural language queries.
+The index is built from summaries AND symbols for deep search.
+Improved: Symbol-level indexing for precise function/class search.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ def _tokenize(text: str) -> list[str]:
 class SemanticIndex:
     """Lightweight TF-IDF based semantic index.
 
-    Indexes summaries for natural language search.
+    Indexes summaries AND symbols for natural language search.
     Designed to be swappable with an embedding-based backend later.
     """
 
@@ -70,6 +71,57 @@ class SemanticIndex:
                 "target_type": summary.target_type,
                 "level": summary.level.value,
                 "generated_by": summary.generated_by.value,
+            },
+        )
+
+    def add_symbol(
+        self,
+        symbol: Symbol,
+        file_path: str,
+        code_snippet: str = "",
+        file_summary: str = "",
+    ) -> None:
+        """Add a symbol to the index for symbol-level search.
+
+        Args:
+            symbol: The symbol entity to index.
+            file_path: Path of the containing file.
+            code_snippet: First N lines of the symbol's code body.
+            file_summary: Summary of the containing file for context.
+        """
+        parts = [
+            f"symbol:{symbol.name}",
+            f"kind:{symbol.kind.value}",
+            f"file:{file_path}",
+        ]
+
+        # Add qualified name for searchability
+        if symbol.path and symbol.path != symbol.name:
+            parts.append(f"qualified:{symbol.path}")
+
+        # Add code snippet (function signatures, class bodies)
+        if code_snippet:
+            # Only take first 10 lines for indexing
+            snippet_lines = code_snippet.split("\n")[:10]
+            parts.append(" ".join(snippet_lines))
+
+        # Add file summary for context enrichment
+        if file_summary:
+            parts.append(file_summary[:200])
+
+        text = " ".join(parts)
+        self.add_document(
+            doc_id=f"sym_{symbol.symbol_id}",
+            text=text,
+            metadata={
+                "target_id": symbol.symbol_id,
+                "target_type": "symbol",
+                "symbol_kind": symbol.kind.value,
+                "symbol_name": symbol.name,
+                "file_path": file_path,
+                "line_start": symbol.line_start,
+                "line_end": symbol.line_end,
+                "level": "symbol",
             },
         )
 
@@ -208,22 +260,35 @@ def build_semantic_index(
     summaries: list[Summary],
     files: list[File] | None = None,
     symbols: list[Symbol] | None = None,
+    file_contents: dict[str, str] | None = None,
 ) -> SemanticIndex:
-    """Build a semantic index from summaries with enriched context.
+    """Build a semantic index from summaries AND symbols with enriched context.
 
     Args:
         summaries: All summaries to index.
         files: Optional files for extra context.
-        symbols: Optional symbols for extra context.
+        symbols: Optional symbols for symbol-level indexing.
+        file_contents: Optional mapping of file_path -> content for code snippets.
 
     Returns:
         Built SemanticIndex ready for search.
     """
     file_map = {f.file_id: f for f in (files or [])}
     symbol_map = {s.symbol_id: s for s in (symbols or [])}
+    file_path_map = {f.path: f for f in (files or [])}
+    contents = file_contents or {}
+
+    # Build summary lookup by target_id for enrichment
+    summary_by_file: dict[str, str] = {}
+    for summary in summaries:
+        if summary.target_type == "file":
+            f = file_map.get(summary.target_id)
+            if f:
+                summary_by_file[f.path] = summary.content
 
     index = SemanticIndex()
 
+    # Index summaries (file-level, module-level, symbol-level summaries)
     for summary in summaries:
         # Add extra context based on target type
         extra = ""
@@ -237,6 +302,35 @@ def build_semantic_index(
                 extra = f"symbol:{s.name} kind:{s.kind.value}"
 
         index.add_summary(summary, extra_context=extra)
+
+    # Index individual symbols for deep search
+    if symbols and files:
+        # Build file_id -> path lookup
+        file_id_to_path = {f.file_id: f.path for f in files}
+
+        for symbol in symbols:
+            f_path = file_id_to_path.get(symbol.file_id, "")
+            if not f_path:
+                continue
+
+            # Get code snippet for this symbol
+            code_snippet = ""
+            content = contents.get(f_path, "")
+            if content and symbol.line_start and symbol.line_end:
+                lines = content.split("\n")
+                start = max(0, symbol.line_start - 1)
+                end = min(len(lines), symbol.line_end)
+                code_snippet = "\n".join(lines[start:end])
+
+            # Get file summary for context
+            file_summary = summary_by_file.get(f_path, "")
+
+            index.add_symbol(
+                symbol=symbol,
+                file_path=f_path,
+                code_snippet=code_snippet,
+                file_summary=file_summary,
+            )
 
     index.build()
     return index

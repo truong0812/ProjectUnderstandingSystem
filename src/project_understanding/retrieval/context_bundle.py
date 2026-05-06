@@ -42,6 +42,7 @@ class ContextBundle(BaseModel):
 
     items: list[ContextItem] = Field(default_factory=list)
     relations: list[dict] = Field(default_factory=list, description="Relevant relations")
+    glossary_context: str = Field(default="", description="Domain glossary formatted for agents")
 
     total_files: int = Field(default=0)
     total_symbols: int = Field(default=0)
@@ -95,6 +96,10 @@ class ContextBundle(BaseModel):
                     f"  {rel.get('source_id', '?')} --[{rel.get('relation_type', '?')}]--> "
                     f"{rel.get('target_id', '?')} ({rel.get('evidence', '')})"
                 )
+
+        if self.glossary_context:
+            lines.append("")
+            lines.append(self.glossary_context)
 
         lines.append(f"\n=== End Context ({len(self.items)} items) ===")
         return "\n".join(lines)

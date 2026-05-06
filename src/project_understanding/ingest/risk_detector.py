@@ -6,6 +6,8 @@ Detects risk areas such as:
 - External API calls
 - File system writes
 - Config/secrets handling
+
+Improved: Filters out config/data files to reduce false positives.
 """
 
 from __future__ import annotations
@@ -52,6 +54,56 @@ _RISK_PATTERNS: dict[RiskCategory, list[re.Pattern[str]]] = {
     ],
 }
 
+# Extensions that should be excluded from risk scanning (config, data, markup)
+_SKIP_EXTENSIONS = {
+    ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
+    ".xml", ".svg", ".html", ".css", ".scss", ".less",
+    ".md", ".txt", ".rst", ".lock", ".map",
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".ttf", ".woff", ".woff2",
+    ".env", ".example", ".sample",
+}
+
+# Filename patterns that are always config/data (checked lowercase)
+_SKIP_FILENAMES = {
+    "package.json", "package-lock.json", "tsconfig.json", "jsconfig.json",
+    "app.json", "metro.config.js", "babel.config.js", "webpack.config.js",
+    "eslint.config.js", ".eslintrc", ".eslintrc.js", ".eslintrc.json",
+    ".prettierrc", ".prettierrc.js", ".prettierrc.json", ".prettierignore",
+    ".editorconfig", ".gitignore", ".gitattributes",
+    "dockerfile", "docker-compose.yml", "docker-compose.yaml",
+    "makefile", "cmakelists.txt",
+    "pyproject.toml", "setup.py", "setup.cfg", "tox.ini",
+    "requirements.txt", "constraints.txt",
+    ".env", ".env.local", ".env.production", ".env.development",
+    "app.config", "web.config", "nuget.config",
+    "declarations.d.ts", "global.d.ts",
+}
+
+
+def _should_skip_file(file: File) -> bool:
+    """Check if a file should be skipped for risk scanning.
+
+    Skips config files, data files, and non-source files to avoid false positives.
+    """
+    from pathlib import Path
+
+    name = Path(file.path).name.lower()
+    ext = Path(file.path).suffix.lower()
+
+    # Skip known config filenames
+    if name in _SKIP_FILENAMES:
+        return True
+
+    # Skip known non-source extensions
+    if ext in _SKIP_EXTENSIONS:
+        return True
+
+    # Skip files with no language detected (not source code)
+    if file.language == "unknown" or not file.language:
+        return True
+
+    return False
+
 
 def detect_risks(
     files: list[File],
@@ -79,6 +131,10 @@ def detect_risks(
         symbols_by_file[sym.file_id].append(sym)
 
     for file in files:
+        # Skip config/data/non-source files to reduce false positives
+        if _should_skip_file(file):
+            continue
+
         content = contents.get(file.path, "")
         if not content:
             continue
@@ -138,6 +194,9 @@ def _detect_risks_in_file(
                 sym_name = sn
                 break
 
+        # Dynamic confidence based on context
+        confidence = _calculate_confidence(file, len(unique_matches), sym_name)
+
         risks.append(RiskArea(
             risk_id=_make_id(category.value, file.file_id, str(first_line)),
             category=category,
@@ -147,11 +206,43 @@ def _detect_risks_in_file(
             symbol_name=sym_name,
             line_range=(first_line, last_line),
             evidence=[ev for _, ev, _ in unique_matches[:5]],
-            confidence=0.85,
+            confidence=confidence,
             severity=severity,
         ))
 
     return risks
+
+
+def _calculate_confidence(file: File, match_count: int, sym_name: str | None) -> float:
+    """Calculate dynamic confidence score based on context.
+
+    Higher confidence when:
+    - Match is inside a named symbol (function/class/method)
+    - Multiple matches in the same file
+    - File is clearly source code (has language)
+
+    Lower confidence when:
+    - No symbol context (top-level code, could be config)
+    - Only 1 match (could be comment or string literal)
+    """
+    base = 0.7
+
+    # Boost: inside a named symbol
+    if sym_name:
+        base += 0.1
+
+    # Boost: multiple matches confirm the pattern
+    if match_count >= 3:
+        base += 0.1
+    elif match_count >= 5:
+        base += 0.15
+
+    # Boost: file has many lines (real source file, not snippet)
+    if hasattr(file, 'size') and file.size and file.size > 500:
+        base += 0.05
+
+    # Cap at 0.95
+    return min(base, 0.95)
 
 
 def _find_symbol_for_line(

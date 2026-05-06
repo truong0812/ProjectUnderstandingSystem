@@ -19,6 +19,9 @@ class RelationType(str, Enum):
     CALLS = "calls"
     DEPENDS_ON = "depends_on"
 
+    # Symbol-level usage (constant/variable/type references)
+    USES = "uses"
+
     # Phase 3 relations (enrichment)
     INHERITS = "inherits"
     IMPLEMENTS = "implements"

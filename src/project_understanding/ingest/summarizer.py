@@ -11,6 +11,7 @@ from pathlib import Path
 from project_understanding.adapters.llm_base import LLMProvider
 from project_understanding.ingest.parser_base import ParsedFile
 from project_understanding.models.entities import File, Symbol
+from project_understanding.ingest.business_glossary import detect_business_context
 from project_understanding.models.summaries import Summary, SummaryLevel, SummarySource
 
 
@@ -19,7 +20,10 @@ Focus on:
 1. Main purpose and responsibility of the file
 2. Key classes, functions, or components defined
 3. Notable dependencies or interactions
-Keep the summary to 2-4 sentences. Be specific and technical."""
+Keep the summary to 2-4 sentences. Be specific and technical.
+
+If the code relates to logistics, airport cargo, shipping, or freight operations,
+also append a brief note about the business domain in Vietnamese."""
 
 
 def generate_file_summary(
@@ -43,6 +47,9 @@ def generate_file_summary(
     """
     summary_id = Summary.make_summary_id(file.file_id, SummaryLevel.FILE)
 
+    # Detect business context in Vietnamese from code content
+    business_ctx = detect_business_context(content) if content.strip() else ""
+
     if llm and content.strip():
         text = _generate_llm_summary(file, content, symbols, llm)
         source = SummarySource.LLM
@@ -58,6 +65,7 @@ def generate_file_summary(
         level=SummaryLevel.FILE,
         generated_by=source,
         language=file.language,
+        business_context=business_ctx,
     )
 
 

@@ -20,6 +20,7 @@ def generate_symbol_summaries(
     files: list[File],
     contents: dict[str, str],
     llm: LLMProvider | None = None,
+    progress_callback=None,
 ) -> list[Summary]:
     """Generate summaries for individual symbols.
 
@@ -28,6 +29,7 @@ def generate_symbol_summaries(
         files: All files (for file path lookup).
         contents: Mapping of file_path -> file_content.
         llm: Optional LLM provider.
+        progress_callback: Optional callback(stage, current, total).
 
     Returns:
         List of symbol-level summaries.
@@ -35,7 +37,7 @@ def generate_symbol_summaries(
     file_map = {f.file_id: f for f in files}
     summaries: list[Summary] = []
 
-    for symbol in symbols:
+    for idx, symbol in enumerate(symbols):
         file = file_map.get(symbol.file_id)
         if not file:
             continue
@@ -52,6 +54,9 @@ def generate_symbol_summaries(
 
         if not symbol_code.strip():
             continue
+
+        if progress_callback:
+            progress_callback("enriching_symbols", idx, len(symbols))
 
         summary_id = Summary.make_summary_id(symbol.symbol_id, SummaryLevel.SYMBOL)
         text = _summarize_symbol(symbol, symbol_code, file, llm)

@@ -6,7 +6,7 @@ parsed file results and entity maps.
 
 from __future__ import annotations
 
-from project_understanding.ingest.parser_base import ParsedFile, ParsedImport, ParsedCall
+from project_understanding.ingest.parser_base import ParsedFile, ParsedImport, ParsedCall, ParsedUsage
 from project_understanding.models.entities import File, Module, Symbol
 from project_understanding.models.relations import Relation, RelationType
 
@@ -242,12 +242,170 @@ def build_depends_on_relations(
     return relations
 
 
+def build_uses_relations(
+    parsed_files: list[ParsedFile],
+    files: list[File],
+    symbols: list[Symbol],
+    file_contents: dict[str, str] | None = None,
+) -> list[Relation]:
+    """Build 'uses' relations — symbol-level usage tracking.
+
+    Detects when a symbol references another symbol (constant, variable, type,
+    component). This enables impact analysis: "if I change constant X, which
+    symbols are affected?"
+
+    Two detection strategies:
+    1. Import-name matching: imported names used inside symbol bodies
+    2. Same-file symbol references: symbols referencing other symbols in same file
+
+    Args:
+        parsed_files: Parse results with import and usage information.
+        files: All File entities.
+        symbols: All Symbol entities.
+        file_contents: Optional file contents for text-based reference detection.
+
+    Returns:
+        List of uses relations.
+    """
+    relations: list[Relation] = []
+    contents = file_contents or {}
+
+    # Build lookups
+    file_by_path = {f.path: f for f in files}
+    symbol_by_name: dict[str, list[Symbol]] = {}
+    for sym in symbols:
+        if sym.name not in symbol_by_name:
+            symbol_by_name[sym.name] = []
+        symbol_by_name[sym.name].append(sym)
+
+    # Build symbol-by-file lookup (symbols within each file)
+    symbols_by_file_id: dict[str, list[Symbol]] = {}
+    for sym in symbols:
+        if sym.file_id not in symbols_by_file_id:
+            symbols_by_file_id[sym.file_id] = []
+        symbols_by_file_id[sym.file_id].append(sym)
+
+    # Track seen pairs to avoid duplicates
+    seen: set[tuple[str, str]] = set()
+
+    for parsed in parsed_files:
+        source_file = file_by_path.get(parsed.file_path)
+        if not source_file:
+            continue
+
+        file_syms = symbols_by_file_id.get(source_file.file_id, [])
+        content = contents.get(parsed.file_path, "")
+
+        # Strategy 1: Import-name matching
+        # For each imported name, find which local symbols use it
+        imported_names: set[str] = set()
+        for imp in parsed.imports:
+            for name in imp.names:
+                imported_names.add(name)
+
+        if imported_names and file_syms and content:
+            lines = content.split("\n")
+            for sym in file_syms:
+                if sym.line_start and sym.line_end:
+                    # Get the symbol's body
+                    start = max(0, sym.line_start - 1)
+                    end = min(len(lines), sym.line_end)
+                    sym_body = "\n".join(lines[start:end])
+
+                    for imported_name in imported_names:
+                        # Check if this symbol references the imported name
+                        # Use word boundary check to avoid partial matches
+                        import re
+                        if re.search(rf'\b{re.escape(imported_name)}\b', sym_body):
+                            # Find the target symbol (the one being imported/used)
+                            target_syms = symbol_by_name.get(imported_name, [])
+                            for target_sym in target_syms:
+                                # Skip self-references
+                                if target_sym.symbol_id == sym.symbol_id:
+                                    continue
+                                pair = (sym.symbol_id, target_sym.symbol_id)
+                                if pair not in seen:
+                                    seen.add(pair)
+                                    relations.append(
+                                        Relation(
+                                            source_id=sym.symbol_id,
+                                            target_id=target_sym.symbol_id,
+                                            relation_type=RelationType.USES,
+                                            confidence=0.75,
+                                            evidence=f"'{sym.name}' uses '{imported_name}' (imported)",
+                                            source_type="Symbol",
+                                            target_type="Symbol",
+                                        )
+                                    )
+
+        # Strategy 2: Same-file symbol references
+        # Detect references between symbols in the same file
+        if file_syms and content:
+            lines = content.split("\n")
+            for sym in file_syms:
+                if not sym.line_start or not sym.line_end:
+                    continue
+                start = max(0, sym.line_start - 1)
+                end = min(len(lines), sym.line_end)
+                sym_body = "\n".join(lines[start:end])
+
+                for other_sym in file_syms:
+                    if other_sym.symbol_id == sym.symbol_id:
+                        continue
+                    # Check if this symbol references another symbol by name
+                    import re
+                    if re.search(rf'\b{re.escape(other_sym.name)}\b', sym_body):
+                        pair = (sym.symbol_id, other_sym.symbol_id)
+                        if pair not in seen:
+                            # Skip if already captured by calls relation
+                            # (calls are a subset of uses)
+                            seen.add(pair)
+                            relations.append(
+                                Relation(
+                                    source_id=sym.symbol_id,
+                                    target_id=other_sym.symbol_id,
+                                    relation_type=RelationType.USES,
+                                    confidence=0.6,
+                                    evidence=f"'{sym.name}' references '{other_sym.name}' (same file)",
+                                    source_type="Symbol",
+                                    target_type="Symbol",
+                                )
+                            )
+
+        # Strategy 3: ParsedUsage data from tree-sitter (if available)
+        for usage in parsed.usages:
+            source_syms = symbol_by_name.get(usage.source_symbol, [])
+            target_syms = symbol_by_name.get(usage.target_name, [])
+
+            if source_syms and target_syms:
+                source_sym = source_syms[0]
+                target_sym = target_syms[0]
+                if source_sym.symbol_id != target_sym.symbol_id:
+                    pair = (source_sym.symbol_id, target_sym.symbol_id)
+                    if pair not in seen:
+                        seen.add(pair)
+                        relations.append(
+                            Relation(
+                                source_id=source_sym.symbol_id,
+                                target_id=target_sym.symbol_id,
+                                relation_type=RelationType.USES,
+                                confidence=0.8,
+                                evidence=f"'{usage.source_symbol}' uses '{usage.target_name}' ({usage.usage_kind}) at line {usage.line}",
+                                source_type="Symbol",
+                                target_type="Symbol",
+                            )
+                        )
+
+    return relations
+
+
 def build_all_relations(
     parsed_files: list[ParsedFile],
     files: list[File],
     modules: list[Module],
     symbols: list[Symbol],
     repo_id: str,
+    file_contents: dict[str, str] | None = None,
 ) -> list[Relation]:
     """Build all relations for a snapshot.
 
@@ -257,6 +415,7 @@ def build_all_relations(
         modules: All Module entities.
         symbols: All Symbol entities.
         repo_id: Repository ID.
+        file_contents: Optional file contents for usage detection.
 
     Returns:
         Complete list of relations.
@@ -275,6 +434,9 @@ def build_all_relations(
 
     # 4. Depends_on relations (derived from imports)
     relations.extend(build_depends_on_relations(files, import_rels))
+
+    # 5. Uses relations (symbol-level usage tracking)
+    relations.extend(build_uses_relations(parsed_files, files, symbols, file_contents))
 
     return relations
 
