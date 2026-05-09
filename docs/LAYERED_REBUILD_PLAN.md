@@ -12,6 +12,33 @@ project from architecture down to functions.
 
 Primary consumer for V2: Review Agent.
 
+## Current Status
+
+Status as of the first V2 implementation slice:
+
+- Implemented a new `project_understanding_v2` package in the existing repo.
+- Added layered Pydantic models for repository, architecture, modules, classes,
+  functions, relations, summaries, quality reports, snapshots, and review
+  contexts.
+- Added file-based V2 snapshot storage with `layered_snapshot.json`,
+  `quality_report.json`, `architecture.json`, and `latest.json`.
+- Added repository scanning and file classification for source, test, config,
+  docs, assets, and unknown files.
+- Added lightweight Python parsing via `ast`.
+- Added lightweight TypeScript parsing via heuristics for the initial slice.
+- Added module grouping, ownership attachment, relation graph construction,
+  architecture inference, heuristic layered summaries, and quality metrics.
+- Added Review Agent context building from changed files/symbols to functions,
+  classes, modules, architecture layers, callers/callees, reverse dependencies,
+  risks, checklist, and evidence.
+- Added the `puv2` CLI entrypoint with `ingest`, `show-architecture`,
+  `show-module`, and `review-context`.
+- Added a small `tests/fixtures/python_service` fixture and V2 end-to-end tests.
+- Verified the current test suite with `pytest -q`: `94 passed`.
+
+This is not the full V2 system yet. It is the first working vertical slice for
+the Review Agent path.
+
 Core reading model:
 
 ```text
@@ -42,23 +69,27 @@ V2 should make the hierarchy explicit and generate output by layer.
 
 ## V2 Architecture
 
-The new system should be built as a clean repo/package. Keep useful ideas from
-V1, but do not preserve the flat snapshot model as the core design.
+The new system is being built as a clean V2 package alongside the V1 prototype.
+Keep useful ideas from V1, but do not preserve the flat snapshot model as the
+core design.
 
-Proposed package layout:
+Current package layout:
 
 ```text
 src/project_understanding_v2/
-  scan/
-  parse/
-  graph/
-  architecture/
-  summarize/
-  review/
-  storage/
-  cli/
-  models/
+  __init__.py
+  cli.py
+  graph.py
+  models.py
+  parse.py
+  pipeline.py
+  review.py
+  scan.py
+  storage.py
 ```
+
+The current slice uses single-file modules for speed. These can be split into
+subpackages once the V2 surface stabilizes.
 
 High-level flow:
 
@@ -252,10 +283,10 @@ Categories:
 - test
 - config
 - docs
-- generated
-- dependency
 - asset
 - unknown
+
+Status: implemented for the initial slice.
 
 Dependency, build, cache, and generated files should be skipped or marked as
 low-priority. Docs and config files should not be treated like source code.
@@ -270,6 +301,9 @@ Initial language support:
 - TypeScript
 
 C# can be added after the V2 model stabilizes.
+
+Status: Python parser implemented with `ast`. TypeScript parser implemented as
+a lightweight heuristic parser for initial tests and CLI usage.
 
 Parsed output should include:
 
@@ -301,6 +335,9 @@ Required indexes:
 
 Review impact analysis depends on both forward and reverse traversal.
 
+Status: initial graph and reverse traversal support are implemented for review
+context. Dedicated reusable graph index classes are still pending.
+
 ### 4. Infer Architecture
 
 Infer architecture from:
@@ -314,6 +351,9 @@ Infer architecture from:
 
 Architecture inference should output confidence and evidence. Low confidence is
 acceptable if it is explicit.
+
+Status: initial path/name-based architecture inference is implemented with
+confidence, entrypoints, dependency direction, and risk zones.
 
 ### 5. Build Modules
 
@@ -330,6 +370,9 @@ Each module should summarize:
 - important classes/functions
 - risk areas
 
+Status: initial path-based module grouping and heuristic module summaries are
+implemented.
+
 ### 6. Build Class And Function Layers
 
 Map classes/components and functions under modules.
@@ -342,6 +385,9 @@ Mark functions as high priority if they are:
 - heavily called
 - entrypoint-adjacent
 - persistence/auth/external API related
+
+Status: initial class/function ownership and risk markers are implemented.
+Priority/lazy summary scheduling is still pending.
 
 ### 7. Summarize Selectively
 
@@ -367,6 +413,9 @@ should retry once, then fall back to heuristic output and record a warning.
 LLM adapters must raise typed errors such as `LLMError`. They must not return
 error strings.
 
+Status: LLM summarization is not implemented in the V2 slice yet. Current V2
+summaries are deterministic heuristics.
+
 ### 8. Build Review Context
 
 Review context should start from changed files or changed symbols and walk up
@@ -384,6 +433,8 @@ changed function
 ```
 
 This is the main V2 value proposition.
+
+Status: initial `build_review_context` is implemented and covered by tests.
 
 ## Public Interfaces
 
@@ -443,11 +494,13 @@ output/
         layered_snapshot.json
         quality_report.json
         architecture.json
-        review_index.json
     latest.json
 ```
 
 The complete layered snapshot should be loadable from `latest.json`.
+
+Status: implemented except `review_index.json`, which is deferred until graph
+indexes are formalized.
 
 ## Quality Report
 
@@ -484,6 +537,9 @@ Non-fatal errors:
 - low architecture confidence
 
 Non-fatal errors should be recorded, not hidden.
+
+Status: implemented for scanner/parser/graph/summary metrics in the initial
+slice. LLM metrics remain zero until LLM summarization is added.
 
 ## Review Agent Output
 
@@ -529,6 +585,9 @@ Required unit tests:
 - snapshot read/write roundtrip
 - quality report generation
 
+Status: initial end-to-end tests exist for ingest and review context. Detailed
+unit coverage for each subsystem is still pending.
+
 ### Fixture Repositories
 
 Create fixture repositories:
@@ -538,6 +597,8 @@ tests/fixtures/python_service/
 tests/fixtures/typescript_app/
 tests/fixtures/mixed_repo/
 ```
+
+Status: `python_service` exists. `typescript_app` and `mixed_repo` are pending.
 
 `python_service` should include:
 
@@ -580,42 +641,53 @@ V2 is acceptable when:
 
 ### Phase 1: Foundation
 
-- create new package structure
-- define Pydantic models
-- implement scanner
-- implement snapshot storage
-- implement quality report
-- create fixture repos
+- [x] create new package structure
+- [x] define Pydantic models
+- [x] implement scanner
+- [x] implement snapshot storage
+- [x] implement quality report
+- [x] create initial `python_service` fixture
 
 ### Phase 2: Parsing And Graph
 
-- implement Python parser
-- implement TypeScript parser
-- build layered entity extraction
-- build relation graph
-- build reverse indexes
+- [x] implement Python parser
+- [x] implement initial TypeScript parser
+- [x] build layered entity extraction
+- [x] build initial relation graph
+- [ ] build reusable graph index classes
 
 ### Phase 3: Architecture And Modules
 
-- infer architecture layers
-- group modules
-- map classes/functions to modules
-- create architecture and module summaries
+- [x] infer architecture layers
+- [x] group modules
+- [x] map classes/functions to modules
+- [x] create heuristic architecture and module summaries
+- [ ] improve architecture inference with import density and framework signals
 
 ### Phase 4: Review Context
 
-- implement review context builder
-- add risk markers
-- add evidence references
-- generate review checklist
-- expose CLI and Python API
+- [x] implement review context builder
+- [x] add risk markers
+- [x] add evidence references
+- [x] generate review checklist
+- [x] expose CLI and Python API
+- [ ] add richer reverse dependency and changed-symbol resolution
 
 ### Phase 5: LLM Enhancement
 
-- add structured LLM summarization
-- validate LLM JSON
-- add retry/fallback
-- measure summary coverage and fallback rate
+- [ ] add structured LLM summarization
+- [ ] validate LLM JSON
+- [ ] add retry/fallback
+- [ ] measure summary coverage and fallback rate
+
+### Phase 6: Hardening
+
+- [ ] add `typescript_app` fixture
+- [ ] add `mixed_repo` fixture
+- [ ] add subsystem-level unit tests
+- [ ] add CLI integration tests
+- [ ] add quality-report CLI command
+- [ ] split V2 single-file modules into subpackages if the API remains stable
 
 ## Assumptions
 

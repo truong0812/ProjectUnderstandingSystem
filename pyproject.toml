@@ -37,6 +37,7 @@ dev = [
 
 [project.scripts]
 pus = "project_understanding.cli.main:main"
+puv2 = "project_understanding_v2.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
