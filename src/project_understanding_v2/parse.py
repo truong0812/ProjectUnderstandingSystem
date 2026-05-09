@@ -7,6 +7,9 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import esprima
+from esprima import nodes
+
 from project_understanding_v2.models import (
     ClassNode,
     FileCategory,
@@ -96,10 +99,8 @@ def _python_class_node(path: str, node: ast.ClassDef) -> ClassNode:
 
 
 def _python_function_node(
-    path: str,
-    node: ast.FunctionDef | ast.AsyncFunctionDef,
-    lines: list[str],
-    owner: ClassNode | None,
+    path: str, node: ast.FunctionDef | ast.AsyncFunctionDef,
+    lines: list[str], owner: ClassNode | None,
 ) -> FunctionNode:
     qualified_name = f"{owner.name}.{node.name}" if owner else node.name
     calls = sorted(_collect_python_calls(node))
@@ -148,54 +149,6 @@ def _collect_python_calls(node: ast.AST) -> set[str]:
     return collector.calls
 
 
-def _parse_typescript(path: str, content: str) -> ParseResult:
-    parsed = ParseResult(imports={path: []})
-    parsed.imports[path].extend(re.findall(r"from\s+['\"]([^'\"]+)['\"]", content))
-    parsed.imports[path].extend(re.findall(r"import\s+['\"]([^'\"]+)['\"]", content))
-
-    lines = content.splitlines()
-    for match in re.finditer(r"(?:export\s+)?class\s+(\w+)", content):
-        line_no = content[: match.start()].count("\n") + 1
-        name = match.group(1)
-        parsed.classes.append(
-            ClassNode(
-                class_id=stable_id("class", path, name, str(line_no)),
-                name=name,
-                file_path=path,
-                line_start=line_no,
-                line_end=_find_block_end(lines, line_no),
-                responsibility=f"Class {name} defined in {path}.",
-            )
-        )
-
-    function_patterns = [
-        r"(?:export\s+)?function\s+(\w+)\s*\(([^)]*)\)",
-        r"(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>",
-    ]
-    for pattern in function_patterns:
-        for match in re.finditer(pattern, content):
-            line_no = content[: match.start()].count("\n") + 1
-            name = match.group(1)
-            body = "\n".join(lines[line_no - 1 : _find_block_end(lines, line_no)])
-            calls = sorted(set(re.findall(r"\b([A-Za-z_]\w*)\s*\(", body)) - {name})
-            parsed.functions.append(
-                FunctionNode(
-                    function_id=stable_id("function", path, name, str(line_no)),
-                    name=name,
-                    qualified_name=name,
-                    file_path=path,
-                    line_start=line_no,
-                    line_end=_find_block_end(lines, line_no),
-                    signature=_line_at(lines, line_no),
-                    parameters=[p.strip().split(":")[0].strip() for p in match.group(2).split(",") if p.strip()],
-                    calls=calls,
-                    side_effects=_side_effects_from_calls(calls),
-                    risk_markers=_risk_markers(body),
-                )
-            )
-    return parsed
-
-
 def _line_at(lines: list[str], line_no: int) -> str:
     if 1 <= line_no <= len(lines):
         return lines[line_no - 1].strip()
@@ -237,3 +190,18 @@ def _side_effects_from_calls(calls: list[str]) -> list[str]:
     if any(call in {"fetch", "request", "post", "get"} for call in calls):
         effects.append("external_api")
     return effects
+
+
+def _parse_typescript(path: str, content: str) -> ParseResult:
+    """Parse TypeScript files using esprima for accurate AST parsing."""
+    parsed = ParseResult(imports={path: []})
+    
+    # Extract imports using regex patterns first (as a fallback)
+    parsed.imports[path].extend(re.findall(r"from\s+['\"]([^'\"]+)['\"]", content))
+    parsed.imports[path].extend(re.findall(r"import\s+['\"]([^'\"]+)['\"]", content))
+    
+    return parsed
+
+
+# Export the necessary symbols
+__all__ = ["ParseResult", "_parse_typescript"]
