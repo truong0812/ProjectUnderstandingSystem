@@ -49,13 +49,21 @@ def build_modules(files: list[FileNode], classes: list[ClassNode], functions: li
         )
 
     by_name = {m.name: m for m in modules}
+    
+    # Optimized: Build path prefix → module lookup table for O(1) dependency resolution
+    # Instead of O(n²) nested loop, we now have O(n) build + O(m) lookup where m = unique prefixes
+    path_to_module: dict[str, str] = {}
+    for module in modules:
+        path_to_module[f"{module.name}/"] = module.name
+    
     imports_by_module: dict[str, set[str]] = defaultdict(set)
     for file_node in files:
         source = _module_name(file_node.path)
-        for other in files:
-            target = _module_name(other.path)
-            if source != target and f"{target}/" in file_node.path:
+        # Check all path prefixes against the lookup table
+        for prefix, target in path_to_module.items():
+            if source != target and prefix in file_node.path:
                 imports_by_module[source].add(target)
+    
     for name, deps in imports_by_module.items():
         if name in by_name:
             by_name[name].dependencies = sorted(deps)

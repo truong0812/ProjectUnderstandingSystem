@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from project_understanding_v2.models import ModuleNode
 from project_understanding_v2.pipeline import ingest_repository
 from project_understanding_v2.review import build_review_context
 from project_understanding_v2.storage import LayeredSnapshotStorage
@@ -49,10 +50,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "show-module":
         snapshot = LayeredSnapshotStorage().read(args.snapshot)
+        # Optimized: Build lookup dictionary for O(1) module search instead of linear O(n) scan
+        module_lookup: dict[str, ModuleNode] = {}
         for module in snapshot.modules:
-            if module.name == args.module_name or module.module_id == args.module_name:
-                print(module.model_dump_json(indent=2))
-                return 0
+            module_lookup[module.module_id] = module
+            module_lookup[module.name] = module
+        module = module_lookup.get(args.module_name)
+        if module:
+            print(module.model_dump_json(indent=2))
+            return 0
         print(f"Module not found: {args.module_name}", file=sys.stderr)
         return 1
     if args.command == "review-context":

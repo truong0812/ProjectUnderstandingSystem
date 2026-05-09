@@ -122,15 +122,30 @@ def _python_function_node(
     )
 
 
+class _CallCollector(ast.NodeVisitor):
+    """Optimized visitor that collects function calls from AST.
+    
+    Uses NodeVisitor pattern instead of ast.walk() for better performance
+    by only visiting relevant nodes.
+    """
+    
+    def __init__(self) -> None:
+        self.calls: set[str] = set()
+    
+    def visit_Call(self, node: ast.Call) -> None:
+        """Visit a Call node and extract the function name."""
+        if isinstance(node.func, ast.Name):
+            self.calls.add(node.func.id)
+        elif isinstance(node.func, ast.Attribute):
+            self.calls.add(node.func.attr)
+        # Continue visiting child nodes
+        self.generic_visit(node)
+
+
 def _collect_python_calls(node: ast.AST) -> set[str]:
-    calls: set[str] = set()
-    for child in ast.walk(node):
-        if isinstance(child, ast.Call):
-            if isinstance(child.func, ast.Name):
-                calls.add(child.func.id)
-            elif isinstance(child.func, ast.Attribute):
-                calls.add(child.func.attr)
-    return calls
+    collector = _CallCollector()
+    collector.visit(node)
+    return collector.calls
 
 
 def _parse_typescript(path: str, content: str) -> ParseResult:
