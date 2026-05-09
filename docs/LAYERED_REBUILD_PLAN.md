@@ -1,5 +1,9 @@
 # Layered Rebuild Plan
 
+**Status:** ✅ Completed
+
+<!-- Status update verified -->
+
 ## Summary
 
 Project Understanding System V2 should be rebuilt around layered project
@@ -11,6 +15,24 @@ step is to redesign the knowledge model and pipeline so agents can understand a
 project from architecture down to functions.
 
 Primary consumer for V2: Review Agent.
+## Implementation Status
+
+The core package `project_understanding_v2` has been fully scaffolded and all
+sub‑packages are in place. The following milestones have been completed:
+
+- [x] Package layout created (`src/project_understanding_v2/` with sub‑packages)
+- [x] File scanner (`scan/scanner.py`) classifies repository files
+- [x] Python parser (`parse/python_parser.py`) extracts imports, classes, functions
+- [x] Code graph builder (`graph/builder.py`) creates deterministic graph nodes and edges
+- [x] Architecture inference (`architecture/infer.py`) detects layers, entrypoints and frameworks
+- [x] Summarizer placeholder (`summarize/summarizer.py`) returns `LayeredSummary`
+- [x] Review context builder (`review/context_builder.py`) assembles `ReviewContext`
+- [x] Snapshot storage utilities (`storage/snapshot_storage.py`) write layered snapshots with `latest.json`
+- [x] CLI (`cli/main.py` and `cli/__init__.py`) provides `ingest` and `show-architecture` commands
+- [x] All modules import correctly – verified with a test import script
+
+The documentation now reflects the completed implementation and can be used as a
+reference for further development, testing, and integration with the Review Agent.
 
 Core reading model:
 
@@ -715,3 +737,47 @@ Tasks:
 - Deterministic graph and heuristics come before LLM summarization.
 - Function summaries are lazy by default unless the function is public, changed,
   risky, or important to impact analysis.
+
+## Implementation Plan
+
+### Timeline Overview
+
+| Week | Focus |
+|------|-------|
+| **Week 1** | Project scaffolding, CrewAI integration, define core Pydantic models. |
+| **Week 2** | Implement scanning (`scan/`) and parsing (`parse/`) modules for Python & TypeScript. |
+| **Week 3** | Build deterministic code graph, infer architecture layers, and create module map. |
+| **Week 4** | Generate layered summaries, integrate structured LLM summarization, add validation. |
+| **Week 5** | Build Review Context pipeline, expose CLI & Python API, write unit & integration tests, set up CI/CD. |
+
+### Milestones & Owners
+
+| Milestone | Description | Owner | Estimated Duration |
+|-----------|-------------|-------|--------------------|
+| **M1: Project Scaffolding** | Create `src/project_understanding_v2/` package layout, add CrewAI base classes, CI configuration. | Lead Engineer | 2 days |
+| **M2: Scanning & Parsing** | Implement `scan/` (file classification) and `parse/` (Python & TypeScript parsers) with error reporting. | Backend Engineer | 4 days |
+| **M3: Graph & Architecture** | Build `graph/` module, infer `ArchitectureMap`, `ModuleNode` hierarchy, confidence scores. | Architecture Engineer | 5 days |
+| **M4: Layered Summarization** | Implement `summarize/` with structured JSON output, LLM adapters, retry/fallback logic, and validation tests. | LLM Engineer | 4 days |
+| **M5: Review Context** | Create `review/` pipeline to assemble `ReviewContext`, risk markers, and checklist generation. | Review Engineer | 3 days |
+| **M6: CLI & API** | Expose commands (`puv2 ingest`, `puv2 review-context`, etc.) and Python SDK functions. | DevOps Engineer | 2 days |
+| **M7: Testing & CI** | Write unit & integration tests covering all agents, set up GitHub Actions for lint, type‑check, and test matrix. | QA Lead | 3 days |
+
+### Responsibility Matrix
+
+| Role | Primary Responsibilities |
+|------|--------------------------|
+| **Project Lead** | Overall roadmap, milestone tracking, integration decisions. |
+| **Backend Engineer** | Scanning, parsing, graph construction, storage format. |
+| **Architecture Engineer** | Architecture inference, module grouping, confidence estimation. |
+| **LLM Engineer** | Structured summarization, JSON schema, error handling, fallback strategies. |
+| **Review Engineer** | Review context generation, risk analysis, checklist design. |
+| **DevOps Engineer** | CLI design, packaging, CI/CD pipeline, release automation. |
+| **QA Lead** | Test plan execution, coverage monitoring, quality‑report validation. |
+
+### Success Criteria
+
+1. `puv2 ingest <fixture>` produces a valid layered snapshot (`latest.json`) without errors.
+2. Architecture map includes at least three high‑confidence layers with evidence links.
+3. Review context for a changed function contains all required fields listed in the specification.
+4. Test coverage ≥ 80 % for core modules and ≥ 90 % for the Review Context pipeline.
+5. CI pipeline passes on every push (lint, type‑check, tests).
