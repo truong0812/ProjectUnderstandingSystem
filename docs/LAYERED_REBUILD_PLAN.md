@@ -242,7 +242,19 @@ Required fields:
 
 ## Pipeline Design
 
-### 1. Scan Repository
+### 0. CrewAI Integration
+Project Understanding System V2 will leverage CrewAI framework to orchestrate multiple AI agents that work together to analyze the codebase and generate structured knowledge. CrewAI provides a robust framework for creating collaborative AI agents that can divide complex tasks into smaller subtasks and work together to achieve the final goal.
+
+The main agents in the system will include:
+- Repository Analysis Agent: Scans and parses the repository structure
+- Architecture Inference Agent: Identifies architectural layers and modules
+- Code Understanding Agent: Analyzes classes, functions and their relationships
+- Knowledge Base Generation Agent: Creates structured knowledge base for other agents
+- Review Context Agent: Generates review-specific context for code changes
+
+These agents will communicate through CrewAI's task delegation and result sharing mechanisms, allowing for efficient parallel processing and information flow.
+
+### 1. Scan Repository (handled by Repository Analysis Agent)
 
 Classify files before parsing.
 
@@ -260,7 +272,7 @@ Categories:
 Dependency, build, cache, and generated files should be skipped or marked as
 low-priority. Docs and config files should not be treated like source code.
 
-### 2. Parse Repository
+### 2. Parse Repository (handled by Repository Analysis Agent)
 
 Extract structure from supported languages.
 
@@ -285,7 +297,7 @@ Parsed output should include:
 Parser errors must be recorded in the quality report. They should not be
 silently swallowed.
 
-### 3. Build Code Graph
+### 3. Build Code Graph (handled by Code Understanding Agent)
 
 Build deterministic relations before any LLM summarization.
 
@@ -301,7 +313,7 @@ Required indexes:
 
 Review impact analysis depends on both forward and reverse traversal.
 
-### 4. Infer Architecture
+### 4. Infer Architecture (handled by Architecture Inference Agent)
 
 Infer architecture from:
 
@@ -315,7 +327,7 @@ Infer architecture from:
 Architecture inference should output confidence and evidence. Low confidence is
 acceptable if it is explicit.
 
-### 5. Build Modules
+### 5. Build Modules (handled by Architecture Inference Agent)
 
 Group files into logical modules.
 
@@ -330,7 +342,7 @@ Each module should summarize:
 - important classes/functions
 - risk areas
 
-### 6. Build Class And Function Layers
+### 6. Build Class and Function Layers (handled by Code Understanding Agent)
 
 Map classes/components and functions under modules.
 
@@ -343,7 +355,7 @@ Mark functions as high priority if they are:
 - entrypoint-adjacent
 - persistence/auth/external API related
 
-### 7. Summarize Selectively
+### 7. Summarize Selectively (handled by Knowledge Base Generation Agent)
 
 Do not summarize every function eagerly.
 
@@ -367,7 +379,7 @@ should retry once, then fall back to heuristic output and record a warning.
 LLM adapters must raise typed errors such as `LLMError`. They must not return
 error strings.
 
-### 8. Build Review Context
+### 8. Build Review Context (handled by Review Context Agent)
 
 Review context should start from changed files or changed symbols and walk up
 and across the graph:
@@ -384,6 +396,18 @@ changed function
 ```
 
 This is the main V2 value proposition.
+
+### Error Handling in Review Context Generation
+
+The review context generation process must handle various error conditions gracefully:
+
+- Missing or incomplete symbol information: When symbol data is unavailable, the system should fall back to file-level analysis and provide appropriate warnings in the quality report.
+- Unparseable code sections: If certain code sections cannot be parsed, the system should skip them and continue processing other parts while recording the issue in the quality report.
+- Failed LLM calls: LLM-based summarization may fail for various reasons; the system should have appropriate fallback mechanisms to ensure the review process can continue with reduced functionality but without complete failure.
+- Missing dependencies: If dependency analysis fails due to missing imports or symbol resolution issues, the system should provide as much context as possible with clear indication of the limitations.
+- Timeout issues: Any time-consuming operations should have appropriate timeouts to prevent the system from hanging, with clear error reporting when timeouts occur.
+
+Error handling should ensure that partial results are still delivered when possible, with clear indication of any limitations or missing information in the output.
 
 ## Public Interfaces
 
@@ -576,7 +600,60 @@ V2 is acceptable when:
 - no mojibake appears in generated Markdown or JSON
 - test suite covers the review-context path end to end
 
+## CrewAI Agent Implementation
+
+### Agent 1: Repository Analysis Agent
+Responsible for scanning and parsing the repository.
+
+Tasks:
+- Scan repository for files and classify them
+- Parse source files using appropriate language parsers
+- Extract basic entities (files, symbols, modules)
+
+Components:
+- File scanner and classifier
+- Language-specific parsers
+- Entity extractor
+
+### Agent 2: Architecture Inference Agent
+Responsible for understanding the high-level architecture.
+
+Tasks:
+- Infer architecture layers from directory structure and import patterns
+- Group files into logical modules
+- Identify entrypoints and architectural boundaries
+
+### Agent 3: Code Understanding Agent
+Responsible for detailed code analysis.
+
+Tasks:
+- Build detailed code graph with relationships
+- Analyze classes, functions and their interactions
+- Identify important code elements and patterns
+
+### Agent 4: Knowledge Base Generation Agent
+Responsible for creating structured knowledge base.
+
+Tasks:
+- Generate summaries for architecture, modules, classes and functions
+- Create layered summaries with appropriate detail levels
+- Build semantic indexes for efficient retrieval
+
+### Agent 5: Review Context Agent
+Responsible for generating context for code reviews.
+
+Tasks:
+- Generate review context for changed files/symbols
+- Identify impacted callers and dependencies
+- Create risk assessments and review checklists
+
 ## Implementation Phases
+
+### Phase 0: CrewAI Framework Integration
+- Set up CrewAI framework in the project
+- Define agent roles, responsibilities and communication patterns
+- Implement basic agent communication and task delegation
+- Create agent configurations and initialization logic
 
 ### Phase 1: Foundation
 
@@ -586,36 +663,46 @@ V2 is acceptable when:
 - implement snapshot storage
 - implement quality report
 - create fixture repos
+- implement CrewAI agent base classes
+- define agent communication protocols
 
-### Phase 2: Parsing And Graph
+### Phase 2: Parsing And Graph (Enhanced with CrewAI)
 
 - implement Python parser
 - implement TypeScript parser
 - build layered entity extraction
 - build relation graph
 - build reverse indexes
+- implement CrewAI-based task orchestration
+- add agent communication mechanisms
 
-### Phase 3: Architecture And Modules
+### Phase 3: Architecture And Modules (Enhanced with CrewAI)
 
 - infer architecture layers
 - group modules
 - map classes/functions to modules
 - create architecture and module summaries
+- implement agent collaboration for architecture inference
+- add multi-agent review of architectural decisions
 
-### Phase 4: Review Context
+### Phase 4: Review Context (Enhanced with CrewAI)
 
 - implement review context builder
 - add risk markers
 - add evidence references
 - generate review checklist
 - expose CLI and Python API
+- implement multi-agent review context generation
+- add agent-based refinement of review checklists
 
-### Phase 5: LLM Enhancement
+### Phase 5: LLM Enhancement (Enhanced with CrewAI)
 
 - add structured LLM summarization
 - validate LLM JSON
 - add retry/fallback
 - measure summary coverage and fallback rate
+- implement agent-based quality control for LLM outputs
+- add multi-agent validation of generated summaries
 
 ## Assumptions
 
